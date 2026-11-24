@@ -221,4 +221,5 @@ markers = [
     "stress: marks tests as stress tests (may take longer to run)",
     "race_condition: marks tests that test for race conditions",
     "both_backends: marks tests that explicitly test both SQLite and PostgreSQL backends",
+    "delivery_defects: marks tests that provoke a delivery defect on purpose",
 ]
