@@ -58,7 +58,7 @@ def _plan_running_stage(
     if claim and store is not None and not store.is_message_processed(claim):
         if queue.has_pending_message_for_stage(stage.id):
             return []
-        return [StartStage(execution_type=kind, execution_id=workflow.id, stage_id=stage.id, message_id=claim)]
+        return [StartStage(execution_type=kind, execution_id=workflow.id, stage_id=stage.id)]
     running = [t for t in stage.tasks if t.status == WorkflowStatus.RUNNING]
     not_started = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
     if running:

@@ -64,18 +64,18 @@ def _fail_first_start_task_push(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(cls, "push_message", flaky)
 
 
-def _half_start(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> tuple[Workflow, StageExecution, Any, StartStage]:
+def _half_start(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> tuple[Workflow, StageExecution, Any, Any]:
     workflow, stage = _joined_workflow(stack)
     _fail_first_start_task_push(monkeypatch)
     handler = StartStageHandler(stack.queue, stack.store, event_recorder=stack.recorder)
-    message = StartStage(
-        execution_type="PIPELINE", execution_id=workflow.id, stage_id=stage.id, message_id=f"half-{stage.id}"
-    )
+    stack.queue.push(StartStage(execution_type="PIPELINE", execution_id=workflow.id, stage_id=stage.id))
+    message = stack.queue.poll_one()
+    assert message is not None and message.message_id
     with pytest.raises(TransientError, match="plan transaction"):
         handler.handle(message)
     claimed = stack.store.retrieve_stage(stage.id)
     assert claimed.status == WorkflowStatus.RUNNING, "the claim did not commit, so this is not the half-started case"
-    assert not stack.queue.has_pending_message_for_stage(stage.id)
+    assert not stack.queue.has_pending_message_for_task(stage.tasks[0].id)
     return workflow, stage, handler, message
 
 
@@ -94,32 +94,42 @@ def test_the_redelivery_of_a_start_whose_plan_failed_plans_the_stage(
     workflow, stage, handler, message = _half_start(stack, monkeypatch)
 
     handler.handle(message)
+    stack.queue.ack(message)
 
-    assert stack.queue.has_pending_message_for_stage(stage.id), (
+    assert stack.queue.has_pending_message_for_task(stage.tasks[0].id), (
         "the redelivery queued nothing: the stage is RUNNING with no message"
     )
     _assert_planned_once(stack, workflow, stage)
 
 
 def test_recovery_restarts_the_plan_of_a_half_started_stage(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    workflow, stage, handler, _message = _half_start(stack, monkeypatch)
+    workflow, stage, handler, message = _half_start(stack, monkeypatch)
 
+    while_queued = plan_running_workflow(stack.store.retrieve(workflow.id), stack.queue, stack.store)
+    assert while_queued == [], f"recovery re-issued {while_queued} while the claiming message was still queued"
+
+    stack.queue.ack(message)
     reissued = plan_running_workflow(stack.store.retrieve(workflow.id), stack.queue, stack.store)
 
     kinds = [type(m).__name__ for m in reissued]
     assert kinds == ["StartStage"], f"recovery re-issued {kinds} for a stage that was never planned"
-    handler.handle(reissued[0])
+    stack.queue.push(reissued[0])
+    delivered = stack.queue.poll_one()
+    assert delivered is not None and delivered.message_id != message.message_id
+    handler.handle(delivered)
+    stack.queue.ack(delivered)
     _assert_planned_once(stack, workflow, stage)
 
 
 def test_another_start_of_a_stage_being_planned_is_ignored(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    workflow, stage, handler, _message = _half_start(stack, monkeypatch)
+    workflow, stage, handler, message = _half_start(stack, monkeypatch)
 
-    handler.handle(
-        StartStage(
-            execution_type="PIPELINE", execution_id=workflow.id, stage_id=stage.id, message_id=f"half-other-{stage.id}"
-        )
+    stack.queue.push(StartStage(execution_type="PIPELINE", execution_id=workflow.id, stage_id=stage.id))
+    other = stack.queue.poll_one()
+    assert other is not None and other.message_id != message.message_id
+    handler.handle(other)
+
+    assert not stack.queue.has_pending_message_for_task(stage.tasks[0].id), (
+        "a second start planned a stage whose claiming message is still queued"
     )
-
-    assert not stack.queue.has_pending_message_for_stage(stage.id), "a second start planned a stage it had not claimed"
     assert events_of(stack, workflow.id, EventType.STAGE_STARTED) == []

@@ -78,6 +78,10 @@ def test_a_waiting_workflow_purged_from_the_queue_records_its_cancellation(stack
     assert stack.store.retrieve(waiting.id).status == WorkflowStatus.CANCELED
     canceled = events_of(stack, waiting.id, EventType.WORKFLOW_CANCELED)
     assert len(canceled) == 1, f"{len(canceled)} workflow.canceled events for a workflow purged while waiting"
+    assert (canceled[0].data["canceled_by"], canceled[0].data["reason"]) == (
+        "system",
+        "Queue purged by keepWaitingPipelines=False policy",
+    )
 
 
 def test_a_waiting_workflow_past_its_start_expiry_records_its_cancellation(stack: Stack) -> None:
@@ -90,6 +94,28 @@ def test_a_waiting_workflow_past_its_start_expiry_records_its_cancellation(stack
     assert stack.store.retrieve(waiting.id).status == WorkflowStatus.CANCELED
     canceled = events_of(stack, waiting.id, EventType.WORKFLOW_CANCELED)
     assert len(canceled) == 1, f"{len(canceled)} workflow.canceled events for a workflow that expired while waiting"
+    assert (canceled[0].data["canceled_by"], canceled[0].data["reason"]) == (
+        "system",
+        "Could not begin execution before start time expiry",
+    )
+    assert stack.store.retrieve(waiting.id).cancellation_reason == "Could not begin execution before start time expiry"
+
+
+def test_a_waiting_workflow_a_user_canceled_keeps_who_canceled_it(stack: Stack) -> None:
+    waiting = _waiting("pending")
+    waiting.pipeline_config_id = f"cfg-{waiting.id}"
+    stack.store.store(waiting)
+    stack.store.cancel(waiting.id, "alice", "changed my mind")
+
+    _promote(stack, waiting.pipeline_config_id, purge=True)
+
+    stored = stack.store.retrieve(waiting.id)
+    assert stored.status == WorkflowStatus.CANCELED
+    assert (stored.canceled_by, stored.cancellation_reason) == ("alice", "changed my mind"), (
+        f"the cancellation is stored as by {stored.canceled_by!r}: {stored.cancellation_reason!r}"
+    )
+    canceled = events_of(stack, waiting.id, EventType.WORKFLOW_CANCELED)
+    assert [(e.data["canceled_by"], e.data["reason"]) for e in canceled] == [("alice", "changed my mind")]
 
 
 def test_a_restarted_workflow_is_running_in_the_log_and_in_replay(stack: Stack) -> None:

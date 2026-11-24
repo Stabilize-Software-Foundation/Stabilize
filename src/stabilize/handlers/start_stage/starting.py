@@ -39,6 +39,22 @@ class StartStageStarting(
 ):
     """The start step of StartStageHandler."""
 
+    def _claimed_and_never_planned(self, stage: StageExecution, message: StartStage) -> bool:
+        """Whether this delivery may plan a RUNNING stage: it is the claiming message, or that message is gone.
+
+        The plan transaction marks the claiming message processed and removes its
+        id from the stage, so an id that is still on the stage, unprocessed and
+        no longer in the queue names a claim whose plan never committed.
+        """
+        claim = stage.context.get(CLAIM_MESSAGE)
+        if not claim:
+            return False
+        if message.message_id == claim:
+            return True
+        if self.repository.is_message_processed(claim):
+            return False
+        return claim not in self.queue.live_delivery_keys([claim])
+
     def _start_if_ready(
         self,
         stage: StageExecution,
@@ -54,9 +70,9 @@ class StartStageStarting(
                 synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
                 has_synthetic = len(synthetic_stages) > 0
 
-                if message.message_id is not None and stage.context.get(CLAIM_MESSAGE) == message.message_id:
+                if self._claimed_and_never_planned(stage, message):
                     logger.warning(
-                        "Stage %s (%s) was claimed by this message and never planned. Resuming planning.",
+                        "Stage %s (%s) was claimed and never planned. Resuming planning.",
                         stage.name,
                         stage.id,
                     )
