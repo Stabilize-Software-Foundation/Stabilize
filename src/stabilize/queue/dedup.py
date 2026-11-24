@@ -96,6 +96,7 @@ class BloomDeduplicator:
         # Initialize bit array as bytearray
         # Each byte holds 8 bits, so we need ceil(size / 8) bytes
         self._bit_array = bytearray((self._size + 7) // 8)
+        self._set_bits = 0
         self._items_added = 0
         self._creation_time = time.monotonic()
         self._max_age_seconds = 86400.0  # 24 hours default
@@ -171,8 +172,11 @@ class BloomDeduplicator:
     def _set_bit(self, pos: int) -> None:
         """Set the bit at position to 1."""
         byte_idx = pos // 8
-        bit_idx = pos % 8
-        self._bit_array[byte_idx] |= 1 << bit_idx
+        mask = 1 << (pos % 8)
+        current = self._bit_array[byte_idx]
+        if not current & mask:
+            self._bit_array[byte_idx] = current | mask
+            self._set_bits += 1
 
     def maybe_seen(self, message_id: str) -> bool:
         """Return True if message might have been seen (check DB to confirm).
@@ -213,6 +217,7 @@ class BloomDeduplicator:
         """
         with self._lock:
             self._bit_array = bytearray((self._size + 7) // 8)
+            self._set_bits = 0
             self._items_added = 0
             self._creation_time = time.monotonic()
             self._authoritative = False
@@ -263,8 +268,7 @@ class BloomDeduplicator:
             Ratio of set bits to total bits.
         """
         with self._lock:
-            set_bits = sum((b).bit_count() for b in self._bit_array)
-            return set_bits / self._size
+            return self._set_bits / self._size
 
     @property
     def items_added(self) -> int:
