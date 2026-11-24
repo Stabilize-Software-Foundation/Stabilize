@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -41,7 +42,7 @@ def test_enable_flips_the_record_on_an_empty_schema_and_names_the_stop_rule(db: 
     mode, enabled_at, enabled_by = _mode(db)
     assert mode == "tenancy"
     assert enabled_at != "-"
-    assert enabled_by == "stabilize"
+    assert enabled_by == urlsplit(db).username
 
     again = stabilize("mg-tenancy", "enable", "--db-url", db)
     assert again.returncode == 0, output(again)

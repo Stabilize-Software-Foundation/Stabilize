@@ -93,7 +93,7 @@ jobs:
           su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
           test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install stabilize 0.34.5 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.34.5' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.34.5' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml coverage
       - name: Installed package is the published one
         run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.34.5' and 'site-packages' in stabilize.__file__ else 1)"
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
