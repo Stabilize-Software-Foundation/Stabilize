@@ -301,3 +301,29 @@ for claim and plan (planning would run under the SQLite write lock and hold a se
 - `HTTPTask` builds a TLS context for every request, plain `http://` included (about 4.5 ms each).
 - With a separate event database, a transaction that is retried after an append (deadlock retry, a lost
   status race at `ResumeStage`) leaves the first attempt's event in the log, as `events/txn_scope.py` states.
+
+## Release record (2026-11-24)
+
+Closed 2026-11-24. stabilize 0.34.6 is on PyPI (uploaded 13:30Z), tag v0.34.6 on main 5c0d7e2, merged as pull request 1 on Stabilize-Software-Foundation/Stabilize.
+
+EARS verification, from CI pipeline 6314 on tree dee2d1a (the released tree; main 5c0d7e2 has the same tree):
+- E1 to E4, E13 to E16 (events in their transaction, refused append, rollback, half-started stage): tests/test_event_transaction_order.py, test_half_started_stage.py, test_workflow_terminal_events.py pass on SQLite and PostgreSQL; job 28856 shows the same tests red on published 0.34.5 ("all 54 tests go red on 0.34.5 for their stated reason").
+- E5, E6 (one completion, compare-and-set): tests/test_workflow_status_guard.py pass on both backends. The fan-out probe on published 0.34.5 in job 28856: workflow.completed per round 1, 3, 1 on SQLite and 10, 10, 10 on PostgreSQL. The same probe on this checkout passed in the audit probes job 28853.
+- E7 (terminal events): tests/test_workflow_terminal_events.py.
+- E8 (delivery defects): tests/test_event_contract.py, and the suite-wide fixture that fails a test with an unexpected defect. Suite result below.
+- E9 (replay identity): probe C on 0.34.5 could not name 33 of 33 stages on both backends; the installed 0.34.6 benchmark prints "All 32 HTTP stages verified via event replay".
+- E10 (fill_ratio): TestFillRatio passes; should_reset 0.2 microseconds against 4,006 on 0.34.5 (local measurement, 100,000-item filter).
+- E11 (benchmark): tests/test_examples_run.py runs it in CI. From PyPI in a new venv, python -I site-packages/stabilize/examples/benchmark-overhead.py in an empty directory: exit 0, phase 3 995 ms, 235 events, the directory left empty.
+- E12 (no schema or payload change): baseline job 28855, existing suite on published 0.34.5 against this checkout tests, 2951 passed; upgrade job 28857 passed.
+
+Suite: Python 3.14 SQLite and PostgreSQL 3066 passed, 2 skipped (job 28852). Python 3.11 3055 passed, 13 skipped (job 28854). Lint and mypy, row-level security, the 5-minute PostgreSQL run and the wheel job passed.
+
+Served artefact: PyPI sha256 of the wheel f3bb11e78eace91f5d7df2673e1bfd25035ba6084185b87ef3887c909fc0ffe7 and of the sdist 4596ab4a3d7215af0b49b31edb74a66ba2f2463c23ab246a390b8e675f3c7759, equal to the files built by CI job 28883 on main. 311 source files in the wheel are byte-equal to main. 365 files of the served wheel equal the installed tree.
+
+Found in CI on the way and fixed in the same pull request: tests/test_mg_tenancy.py expected the gate role name (7720331); the baseline venv lacked coverage (7720331); tests/test_subscription_cursor.py polled before the server-wide commit watermark had passed its event, and failed once in pipeline 6313 with four workers on one server (c87c3ec). CI could not build the new repository until CI allowed its installation account (CI #329).
+
+What was exercised: the paths above, on SQLite and on CI PostgreSQL 18, with xdist workers on one server, a 10-worker processor in the probe, and a 5-minute sustained PostgreSQL run.
+
+What was not tested: sustained load beyond 5 minutes; more than one processor host; a real process kill between the two StartStage transactions (the tests inject a TransientError); Webmail throughput on their hardware and their cProfile case on PostgreSQL; a full local suite (barred on vm-1). The plan had a first pipeline with the red tests alone; I dropped it and relied on the falsification job, which runs the same tests against published 0.34.5.
+
+What I remain unsure about: Webmail reported 24 s for benchmark phase 3 on a 2-core machine and I could not reproduce or explain it. The four red-proof shards had not finished when the release went out, so I do not know whether each new test fails on an engine mutant. The manual red-proofs job fails on 10 of 50 proofs, 9 of them stale on main before this change (#112). A started event after its completed event was allowed by the 0.34.5 fault and never observed.
