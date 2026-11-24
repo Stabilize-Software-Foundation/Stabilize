@@ -262,7 +262,7 @@ def test_replay_names_a_stage_whose_first_event_carries_no_identity(stack: Stack
     workflow = one_stage_workflow()
     set_statuses(workflow, WorkflowStatus.RUNNING, WorkflowStatus.RUNNING)
     stack.store.store(workflow)
-    stage = workflow.stages[0]
+    stage = stack.store.retrieve_stage(workflow.stages[0].id)
     task = stage.tasks[0]
 
     stack.recorder.record_outputs_updated(

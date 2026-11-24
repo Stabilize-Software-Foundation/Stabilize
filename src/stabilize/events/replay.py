@@ -69,6 +69,12 @@ class WorkflowState:
         }
 
 
+def _fill_missing(entry: dict[str, Any], data: dict[str, Any], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        if entry.get(key) is None and data.get(key) is not None:
+            entry[key] = data[key]
+
+
 class EventReplayer:
     """Replays events to reconstruct state.
 
@@ -268,6 +274,9 @@ class EventReplayer:
         elif event.event_type == EventType.CONTEXT_UPDATED and "context" in event.data:
             state.context.update(event.data["context"])
 
+        elif event.event_type == EventType.STATUS_CHANGED and event.data.get("new_status"):
+            state.status = event.data["new_status"]
+
     def _apply_stage_event(self, state: WorkflowState, event: Event) -> None:
         """Apply a stage event."""
         stage_id = event.entity_id
@@ -282,6 +291,7 @@ class EventReplayer:
             }
 
         stage = state.stages[stage_id]
+        _fill_missing(stage, event.data, ("ref_id", "type", "name"))
 
         if event.event_type == EventType.STAGE_STARTED:
             stage["status"] = "RUNNING"
@@ -324,6 +334,7 @@ class EventReplayer:
             }
 
         task = state.tasks[task_id]
+        _fill_missing(task, event.data, ("name", "stage_id"))
 
         if event.event_type == EventType.TASK_STARTED:
             task["status"] = "RUNNING"
