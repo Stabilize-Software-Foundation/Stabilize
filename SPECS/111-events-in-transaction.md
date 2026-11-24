@@ -266,12 +266,38 @@ and not planned" is `RUNNING` plus a claim id whose message is not marked proces
 
 - The claim transaction writes the claiming message's id into the stage context under an engine key; the plan
   transaction removes it.
-- `StartStage` for a RUNNING stage whose claim id equals its own message id resumes planning through the
-  existing zombie re-plan path (claim with expected phase RUNNING, version check).
-- `recovery_plan._plan_running_stage`: a RUNNING stage with a claim id, no queued message and an unprocessed
-  claim message gets `StartStage` under that id.
+- `StartStage` for a RUNNING stage resumes planning through the existing zombie re-plan path (claim with
+  expected phase RUNNING, version check) when its own message id is the claim id, or when the claiming
+  message is neither marked processed nor still a row of the queue (`Queue.live_delivery_keys`).
+- `recovery_plan._plan_running_stage`: a RUNNING stage with a claim id whose message is unprocessed gets
+  nothing while a message for the stage is queued, and `StartStage` once none is.
+- First version of this rule matched on the id alone and gave recovery's `StartStage` the claim id. Refuted
+  before release: a queue names a delivery by its row id, so the re-issued message arrives under a new id.
+  The test that passed handed the message to the handler without the queue; the tests now push and poll.
+- On 0.34.5 the sweep re-issued `StartTask` even while the claiming `StartStage` was still queued (seen in the
+  falsification run against the published package).
+- Relies on a workflow's messages living in one queue table, which `queue_table` on the workflow row fixes.
 
 Rejected: recording `stage.started` in the claim transaction (its `task_count` would be read before planning
 builds the tasks, and it leaves the unplanned stage as it is). Re-planning any RUNNING stage with no started
 task (a second upstream's `StartStage` arriving while the first is planning would plan twice). One transaction
 for claim and plan (planning would run under the SQLite write lock and hold a second PostgreSQL connection).
+
+### Also found and fixed
+
+- A waiting workflow that a user canceled had `canceled_by` and `cancellation_reason` overwritten with
+  `system` and the purge reason when the queue was purged; a workflow that expired while waiting was stored
+  with the purge reason. CONFIRMED on published 0.34.5, both backends.
+- A workflow that ended TERMINAL for having no initial stages kept `end_time` empty on the `StartWorkflow`
+  path; it is now set there as on the waiting path.
+
+### Observed and left as it is
+
+- `StartWaitingWorkflows` writes the cancellation fields of a purged workflow after its transaction commits;
+  a process that stops in between leaves status CANCELED with those fields empty. The `workflow.canceled`
+  event now carries them.
+- A waiting workflow flagged canceled between the candidate read and the admission lock is recorded with
+  `canceled_by` empty in its event; the store row holds the value.
+- `HTTPTask` builds a TLS context for every request, plain `http://` included (about 4.5 ms each).
+- With a separate event database, a transaction that is retried after an append (deadlock retry, a lost
+  status race at `ResumeStage`) leaves the first attempt's event in the log, as `events/txn_scope.py` states.

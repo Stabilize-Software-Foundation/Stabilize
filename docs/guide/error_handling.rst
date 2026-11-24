@@ -381,9 +381,11 @@ committed, the mark raises ``DuplicateDeliveryError`` inside that transaction, t
 transaction rolls back, and both drain paths acknowledge the message without pushing
 again. A handler that still pushes on the queue's own connection, or in a transaction
 that does not mark the delivered message, is recorded on
-``processor.delivery_defects`` and logged at ERROR. With ``STABILIZE_STRICT_DELIVERY=1``
-in the environment, ``process_all()`` raises ``DeliveryContractError`` at the end of a
-drain that recorded one.
+``processor.delivery_defects`` and logged at ERROR. The same record is made for an engine event that a handler appends with no store
+transaction open on its thread, and for an event held for a transaction the handler
+never opened. Events a task emits with ``emit_progress`` are not counted.
+With ``STABILIZE_STRICT_DELIVERY=1`` in the environment, ``process_all()`` raises
+``DeliveryContractError`` at the end of a drain that recorded one.
 
 To drain through transient errors in a script or a test:
 
