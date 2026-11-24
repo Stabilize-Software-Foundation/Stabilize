@@ -22,6 +22,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 30
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1, whose own mg-up builds the databases the takeover tests start from
@@ -36,6 +44,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 40
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Engine tables in a non-default schema for probe_schema_and_exists
@@ -49,6 +65,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 30
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install on a managed CPython 3.11
         run: uv venv -p 3.11 .venv311 && .venv311/bin/python -c "import sys; print(sys.version); sys.exit(0 if sys.version_info[:2] == (3, 11) else 1)" && uv pip install -p .venv311/bin/python -e '.[dev,observability,cli]'
       - name: Unit and golden tests
@@ -60,6 +84,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 50
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install stabilize 0.33.2 from PyPI, not the checkout
         run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.2' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
       - name: Installed package is the published one
@@ -85,6 +117,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 50
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install stabilize 0.33.2 from PyPI, not the checkout
         run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.2' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
@@ -108,6 +148,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 25
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install published 0.33.2 and this checkout side by side
         run: uv venv .old && uv pip install -p .old/bin/python 'stabilize[postgres,cli]==0.33.2' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Old release starts the work, this checkout finishes it
@@ -123,6 +171,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 15
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: RLS and pool-hook tests, every test named, then pytest's exit code
@@ -161,6 +217,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 15
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Soak
@@ -174,6 +238,14 @@ jobs:
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
@@ -189,6 +261,14 @@ jobs:
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
@@ -204,6 +284,14 @@ jobs:
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
@@ -219,6 +307,14 @@ jobs:
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
@@ -232,6 +328,14 @@ jobs:
     services: [postgres]
     timeout_minutes: 60
     steps:
+      - name: Name the postgres service cluster stabilize-gate-ci, which the test fixtures' guard requires
+        run: |
+          set -eu
+          psql "$DATABASE_URL" -c "ALTER SYSTEM SET cluster_name = 'stabilize-gate-ci'"
+          data_dir="$(psql "$DATABASE_URL" -Atc 'SHOW data_directory')"
+          major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
+          su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
+          test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
