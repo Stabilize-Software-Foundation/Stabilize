@@ -211,7 +211,7 @@ class Orchestrator:
             )
         else:
             message = CompleteWorkflow(execution_type=execution.type.value, execution_id=execution.id)
-        txn.update_workflow_status(execution)
+        txn.update_workflow_status(execution, expected_status=WorkflowStatus.PAUSED.name)
         self._record_resumed(execution)
         txn.push_message(message)
 
@@ -234,7 +234,7 @@ class Orchestrator:
             return
         if status == WorkflowStatus.PAUSED.name:
             execution.resume()
-            txn.update_workflow_status(execution)
+            txn.update_workflow_status(execution, expected_status=WorkflowStatus.PAUSED.name)
             self._record_resumed(execution)
         for stage_id in paused:
             txn.push_message(

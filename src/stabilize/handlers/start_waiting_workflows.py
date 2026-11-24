@@ -66,12 +66,9 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
         if not message.pipeline_config_id:
             return
         started, canceled = promote_waiting(self, message.pipeline_config_id, message.purge_queue, message)
-        for execution in canceled:
-            self.repository.cancel(
-                execution.id,
-                canceled_by="system",
-                reason="Queue purged by keepWaitingPipelines=False policy",
-            )
+        for execution, reason in canceled:
+            if reason is not None:
+                self.repository.cancel(execution.id, canceled_by="system", reason=reason)
         logger.info(
             "Waiting workflows for %s: %d started, %d canceled",
             message.pipeline_config_id,
@@ -79,14 +76,6 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
             len(canceled),
         )
         for execution, initial in started:
-            if self.event_recorder:
-                self.set_event_context(execution.id)
-                self.event_recorder.record_workflow_created(execution, source_handler="StartWaitingWorkflowsHandler")
-                self.event_recorder.record_workflow_started(
-                    execution,
-                    initial_stage_ids=[s.id for s in initial],
-                    source_handler="StartWaitingWorkflowsHandler",
-                )
             audit(
                 event_type="WORKFLOW_LIFECYCLE",
                 action="START",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from stabilize.errors import ConcurrencyError
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.persistence.postgres.transaction_signals import PostgresSignalTransactionMixin
 from stabilize.persistence.store import StoreTransaction
@@ -109,8 +110,7 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
                 {"v": config_version, "id": workflow_id, "tenant": self._tenant},
             )
 
-    def update_workflow_status(self, workflow: Workflow) -> None:
-        """Update workflow status within the transaction."""
+    def update_workflow_status(self, workflow: Workflow, *, expected_status: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
                 """
@@ -119,7 +119,7 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
                     start_time = %(start_time)s,
                     end_time = %(end_time)s,
                     queue_table = COALESCE(%(queue_table)s, queue_table)
-                WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
+                WHERE id = %(id)s AND stabilize_tenant = %(tenant)s AND status = %(expected)s
                 """,
                 {
                     "id": workflow.id,
@@ -128,8 +128,12 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
                     "start_time": workflow.start_time,
                     "end_time": workflow.end_time,
                     "queue_table": workflow.queue_table,
+                    "expected": expected_status,
                 },
             )
+            matched = cur.rowcount
+        if matched != 1:
+            raise ConcurrencyError(f"Workflow {workflow.id} is no longer {expected_status}")
 
     def push_message(self, message: Message, delay: float = 0) -> None:
         """Push a message to the queue within the transaction.

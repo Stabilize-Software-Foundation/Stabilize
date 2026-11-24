@@ -201,23 +201,14 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
             {"v": config_version, "id": workflow_id, "tenant": self._tenant},
         )
 
-    def update_workflow_status(self, workflow: Workflow) -> None:
-        """Update workflow status within the transaction.
-
-        This performs the same operations as SqliteWorkflowStore.update_status()
-        but does NOT commit - the commit happens when the transaction
-        context manager exits successfully.
-
-        Args:
-            workflow: Workflow with updated status
-        """
-        self._conn.execute(
+    def update_workflow_status(self, workflow: Workflow, *, expected_status: str) -> None:
+        cursor = self._conn.execute(
             f"""
             UPDATE pipeline_executions SET
                 status = :status,
                 start_time = :start_time,
                 end_time = :end_time{_QUEUE_TABLE_SET if has_queue_table_column(self._conn) else ""}
-            WHERE id = :id AND stabilize_tenant = :tenant
+            WHERE id = :id AND stabilize_tenant = :tenant AND status = :expected
             """,
             {
                 "id": workflow.id,
@@ -226,8 +217,11 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
                 "start_time": workflow.start_time,
                 "end_time": workflow.end_time,
                 "queue_table": workflow.queue_table,
+                "expected": expected_status,
             },
         )
+        if cursor.rowcount != 1:
+            raise ConcurrencyError(f"Workflow {workflow.id} is no longer {expected_status}")
 
     def push_message(
         self,

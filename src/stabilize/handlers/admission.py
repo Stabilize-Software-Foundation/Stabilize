@@ -50,11 +50,10 @@ def limits_concurrency(execution: Workflow) -> bool:
 def start_running(
     handler: Any, txn: StoreTransaction, execution: Workflow, initial_stages: list[StageExecution]
 ) -> None:
-    metrics.increment("workflow_count", application=execution.application)
-    handler.set_workflow_status(execution, WorkflowStatus.RUNNING)
     execution.start_time = handler.current_time_millis()
     execution.queue_table = execution.queue_table or queue_table_name(handler.queue)
-    txn.update_workflow_status(execution)
+    handler.claim_workflow_status(txn, execution, WorkflowStatus.RUNNING)
+    metrics.increment("workflow_count", application=execution.application)
     for stage in initial_stages:
         txn.push_message(
             StartStage(
@@ -65,8 +64,17 @@ def start_running(
         )
 
 
+NO_INITIAL_STAGES = "Workflow has no initial stages"
+EXPIRED = "Could not begin execution before start time expiry"
+PURGED = "Queue purged by keepWaitingPipelines=False policy"
+
+
 def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> tuple[list[Any], list[Any]]:
     """Start the oldest BUFFERED workflows of config_id up to the free slots; cancel the rest when purging.
+
+    Returns the started (workflow, initial stages) pairs and the canceled
+    (workflow, reason) pairs; the reason is None for a workflow that was
+    already flagged canceled and keeps who canceled it.
 
     The candidates are listed under the admission lock, loaded outside it (no
     second connection is taken while the lock is held), and decided under the
@@ -80,7 +88,8 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
             ids = sorted(w.id for w in _by_status(repository, config_id, WorkflowStatus.BUFFERED))
     candidates = [repository.retrieve(i) for i in ids]
     started: list[tuple[Workflow, list[StageExecution]]] = []
-    canceled: list[Workflow] = []
+    canceled: list[tuple[Workflow, str | None]] = []
+    failed: list[Workflow] = []
     with repository.transaction(handler.queue) as txn:
         locked = try_lock_admission(txn, config_id)
         if locked:
@@ -98,19 +107,21 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
             free = limit <= 0 or running < limit
             expired = execution.start_time_expiry is not None and now > execution.start_time_expiry
             if execution.is_canceled or expired or (not free and purge):
-                handler.set_workflow_status(execution, WorkflowStatus.CANCELED)
+                reason = None if execution.is_canceled else (EXPIRED if expired else PURGED)
+                if reason is not None:
+                    execution.cancel("system", reason)
                 execution.end_time = now
-                txn.update_workflow_status(execution)
-                canceled.append(execution)
+                handler.claim_workflow_status(txn, execution, WorkflowStatus.CANCELED)
+                canceled.append((execution, reason))
                 continue
             if not free:
                 continue
             initial = execution.initial_stages()
             if not initial:
-                handler.set_workflow_status(execution, WorkflowStatus.RUNNING)
-                handler.set_workflow_status(execution, WorkflowStatus.TERMINAL)
+                handler.claim_workflow_status(txn, execution, WorkflowStatus.RUNNING)
                 execution.end_time = now
-                txn.update_workflow_status(execution)
+                handler.claim_workflow_status(txn, execution, WorkflowStatus.TERMINAL)
+                failed.append(execution)
                 continue
             start_running(handler, txn, execution, initial)
             running += 1
@@ -121,6 +132,12 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
                 handler_type="StartWaitingWorkflows",
                 execution_id=None,
             )
+        for execution, initial in started:
+            handler.record_workflow_start(execution, [s.id for s in initial])
+        for execution, _reason in canceled:
+            handler.record_workflow_end(execution, WorkflowStatus.CANCELED)
+        for execution in failed:
+            handler.record_workflow_end(execution, WorkflowStatus.TERMINAL, NO_INITIAL_STAGES)
     return started, canceled
 
 

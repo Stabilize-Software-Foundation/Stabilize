@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from stabilize.audit import audit
-from stabilize.handlers.admission import limits_concurrency, start_running, try_lock_admission
+from stabilize.handlers.admission import NO_INITIAL_STAGES, limits_concurrency, start_running, try_lock_admission
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -141,8 +141,7 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                 limit,
                 len(waiting_older),
             )
-            self.set_workflow_status(execution, WorkflowStatus.BUFFERED)
-            txn.update_workflow_status(execution)
+            self.claim_workflow_status(txn, execution, WorkflowStatus.BUFFERED)
             self._mark(txn, message)
             return None
         return self._start_in(txn, execution, message)
@@ -161,25 +160,19 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
         initial_stages = execution.initial_stages()
         if not initial_stages:
             logger.warning("No initial stages found for execution %s", execution.id)
-            self.set_workflow_status(execution, WorkflowStatus.TERMINAL)
-            txn.update_workflow_status(execution)
+            execution.end_time = self.current_time_millis()
+            self.claim_workflow_status(txn, execution, WorkflowStatus.TERMINAL)
             self._mark(txn, message)
+            self.record_workflow_end(execution, WorkflowStatus.TERMINAL, NO_INITIAL_STAGES)
             return None
         start_running(self, txn, execution, initial_stages)
         self._mark(txn, message)
+        self.record_workflow_start(execution, [s.id for s in initial_stages])
         return initial_stages
 
     def _after_start(self, execution: Workflow, initial_stages: list[StageExecution] | None) -> None:
         if initial_stages is None:
             return
-        if self.event_recorder:
-            self.set_event_context(execution.id)
-            self.event_recorder.record_workflow_created(execution, source_handler="StartWorkflowHandler")
-            self.event_recorder.record_workflow_started(
-                execution,
-                initial_stage_ids=[s.id for s in initial_stages],
-                source_handler="StartWorkflowHandler",
-            )
         audit(
             event_type="WORKFLOW_LIFECYCLE",
             action="START",
@@ -195,11 +188,11 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
         logger.info("Started execution %s with %d initial stage(s)", execution.id, len(initial_stages))
 
     def _terminate(self, execution: Workflow, message: StartWorkflow) -> None:
-        self.set_workflow_status(execution, WorkflowStatus.CANCELED)
         execution.end_time = self.current_time_millis()
         with self.repository.transaction(self.queue) as txn:
-            txn.update_workflow_status(execution)
+            self.claim_workflow_status(txn, execution, WorkflowStatus.CANCELED)
             self._mark(txn, message)
+            self.record_workflow_end(execution, WorkflowStatus.CANCELED)
 
     def _is_after_start_time_expiry(self, execution: Workflow) -> bool:
         """Check if current time is past start time expiry."""

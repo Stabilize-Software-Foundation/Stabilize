@@ -424,30 +424,32 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         )
         task.status = new_status
 
-    def set_workflow_status(
+    def claim_workflow_status(
         self,
+        txn: StoreTransaction,
         workflow: Workflow,
         new_status: WorkflowStatus,
+        *,
+        validate: bool = True,
     ) -> None:
-        """Set workflow status with validation.
+        """Move the workflow to new_status in txn, over a row that still holds the status this handler read.
 
-        Validates the transition is allowed before setting the status.
-
-        Args:
-            workflow: The workflow to update
-            new_status: The new status to set
+        Writes the workflow's start and end time as they stand, then records the
+        status change. The caller sets those times first.
 
         Raises:
-            InvalidStateTransitionError: If the transition is not allowed
+            InvalidStateTransitionError: validate is set and the transition is not allowed
+            ConcurrencyError: the row holds another status; the workflow object is left as it was
         """
         old_status = workflow.status
-        validate_transition(
-            workflow.status,
-            new_status,
-            entity_type="workflow",
-            entity_id=workflow.id,
-        )
+        if validate:
+            validate_transition(old_status, new_status, entity_type="workflow", entity_id=workflow.id)
         workflow.status = new_status
+        try:
+            txn.update_workflow_status(workflow, expected_status=old_status.name)
+        except ConcurrencyError:
+            workflow.status = old_status
+            raise
         version = workflow.stages[0].version if workflow.stages else 1
         self.record_status_transition("workflow", workflow.id, workflow.id, old_status, new_status, version)
 

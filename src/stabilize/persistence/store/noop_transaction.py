@@ -72,11 +72,12 @@ class NoOpTransaction(StoreTransaction):
         """
         self._pending_stages.append((stage, expected_phase))
 
-    def update_workflow_status(self, workflow: Workflow) -> None:
+    def update_workflow_status(self, workflow: Workflow, *, expected_status: str) -> None:
         """Buffer workflow status update when transaction completes.
 
         Workflows are buffered and flushed when the context manager exits
         successfully. If an exception occurs, workflows are not updated.
+        expected_status is not checked: the store this wraps has no conditional write.
         """
         self._pending_workflows.append(workflow)
 

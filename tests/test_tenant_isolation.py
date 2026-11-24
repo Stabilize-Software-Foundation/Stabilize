@@ -147,7 +147,7 @@ def test_writes_from_the_other_tenant_do_not_touch_the_rows(tenants: tuple[Parts
     foreign.status = WorkflowStatus.TERMINAL
     try:
         with b.store.transaction() as txn:
-            txn.update_workflow_status(foreign)
+            txn.update_workflow_status(foreign, expected_status=before.status.name)
     except Exception:
         pass
 
