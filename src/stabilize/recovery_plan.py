@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from stabilize.models.stage.completion_records import recorded_completion
+from stabilize.models.stage.stage import CLAIM_MESSAGE
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CompleteStage,
@@ -35,7 +36,7 @@ def plan_running_workflow(workflow: Workflow, queue: Queue, store: Any | None = 
     messages: list[Message] = []
     for stage in workflow.stages:
         if stage.status == WorkflowStatus.RUNNING:
-            messages.extend(_plan_running_stage(workflow, stage, queue))
+            messages.extend(_plan_running_stage(workflow, stage, queue, store))
         elif stage.status == WorkflowStatus.SUSPENDED and store is not None:
             messages.extend(_plan_suspended_stage(workflow, stage, queue, store))
         elif (
@@ -49,8 +50,15 @@ def plan_running_workflow(workflow: Workflow, queue: Queue, store: Any | None = 
     return messages
 
 
-def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue) -> list[Message]:
+def _plan_running_stage(
+    workflow: Workflow, stage: StageExecution, queue: Queue, store: Any | None = None
+) -> list[Message]:
     kind = workflow.type.value
+    claim = stage.context.get(CLAIM_MESSAGE)
+    if claim and store is not None and not store.is_message_processed(claim):
+        if queue.has_pending_message_for_stage(stage.id):
+            return []
+        return [StartStage(execution_type=kind, execution_id=workflow.id, stage_id=stage.id, message_id=claim)]
     running = [t for t in stage.tasks if t.status == WorkflowStatus.RUNNING]
     not_started = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
     if running:

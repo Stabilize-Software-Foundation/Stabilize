@@ -152,12 +152,11 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                         task_type=task_model.implementing_class,
                     )
                 )
-
-            if self.event_recorder:
-                self.set_event_context(stage.execution.id)
-                self.event_recorder.record_task_started(
-                    task_model, stage.execution.id, source_handler="StartTaskHandler"
-                )
+                if self.event_recorder:
+                    self.set_event_context(stage.execution.id)
+                    self.event_recorder.record_task_started(
+                        task_model, stage.execution.id, source_handler="StartTaskHandler"
+                    )
 
             logger.debug(
                 "Started task %s (%s) in stage %s",

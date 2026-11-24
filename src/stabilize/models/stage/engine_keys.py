@@ -51,6 +51,7 @@ CONTROL_FLOW_KEYS = frozenset(
     {
         "_activated_branches",
         "_blocking_failure",
+        "_claim_message",
         "_completed_branches",
         "_deferred_choice_failed",
         "_join_fired",

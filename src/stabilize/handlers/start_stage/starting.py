@@ -13,6 +13,7 @@ from stabilize.handlers.start_stage.conditions import StartStageConditionsMixin
 from stabilize.handlers.start_stage.orchestration import StartStageOrchestrationMixin
 from stabilize.handlers.start_stage.planner import StartStagePlannerMixin
 from stabilize.models.stage import JoinType
+from stabilize.models.stage.stage import CLAIM_MESSAGE
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import SkipStage, StartStage
 
@@ -53,7 +54,13 @@ class StartStageStarting(
                 synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
                 has_synthetic = len(synthetic_stages) > 0
 
-                if not has_tasks and not has_synthetic:
+                if message.message_id is not None and stage.context.get(CLAIM_MESSAGE) == message.message_id:
+                    logger.warning(
+                        "Stage %s (%s) was claimed by this message and never planned. Resuming planning.",
+                        stage.name,
+                        stage.id,
+                    )
+                elif not has_tasks and not has_synthetic:
                     logger.warning(
                         "Detected Zombie Stage %s (%s): RUNNING but no tasks/synthetic stages. Resuming planning.",
                         stage.name,
@@ -193,6 +200,8 @@ class StartStageStarting(
             claim_expected_phase = "NOT_STARTED"
             stage.start_time = self.current_time_millis()
             self.set_stage_status(stage, WorkflowStatus.RUNNING)
+            if message.message_id is not None:
+                stage.context[CLAIM_MESSAGE] = message.message_id
 
         try:
             with self.repository.transaction(self.queue) as txn:
@@ -224,6 +233,7 @@ class StartStageStarting(
             # The claim transaction rolled back: this stage did not start.
             stage.status = WorkflowStatus.NOT_STARTED
             stage.start_time = None
+            stage.context.pop(CLAIM_MESSAGE, None)
             if blocked.kind == "mutex":
                 # Mutex held by a live sibling - wait and retry.
                 logger.debug(
@@ -320,6 +330,7 @@ class StartStageStarting(
             messages_to_push.extend(self._deferred_choice_sibling_messages(stage, message))
 
         # Atomic: store planned stage + push all start messages together
+        stage.context.pop(CLAIM_MESSAGE, None)
         try:
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
@@ -336,6 +347,13 @@ class StartStageStarting(
 
                 for msg in messages_to_push:
                     txn.push_message(msg)
+
+                if self.event_recorder:
+                    self.set_event_context(stage.execution.id)
+                    self.event_recorder.record_stage_started(
+                        stage,
+                        source_handler="StartStageHandler",
+                    )
         except ConcurrencyError:
             # This shouldn't happen since we already claimed the stage,
             # but handle it gracefully just in case.
@@ -346,11 +364,3 @@ class StartStageStarting(
             return
 
         logger.info("Started stage %s (%s)", stage.name, stage.id)
-
-        # Record event if event recorder is configured
-        if self.event_recorder:
-            self.set_event_context(stage.execution.id)
-            self.event_recorder.record_stage_started(
-                stage,
-                source_handler="StartStageHandler",
-            )
