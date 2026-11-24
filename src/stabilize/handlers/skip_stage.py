@@ -118,14 +118,6 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
 
             logger.info("Skipped stage %s (%s)%s", stage.name, stage.id, " (pruned)" if message.pruned else "")
 
-            if self.event_recorder:
-                self.set_event_context(stage.execution.id)
-                self.event_recorder.record_stage_skipped(
-                    stage,
-                    reason="Stage pruned" if message.pruned else "Stage skipped",
-                    source_handler="SkipStageHandler",
-                )
-
             # Get downstream stages and parent info BEFORE transaction
             execution = stage.execution
             downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
@@ -182,6 +174,14 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
                             execution_type=execution.type.value,
                             execution_id=execution.id,
                         )
+                    )
+
+                if self.event_recorder:
+                    self.set_event_context(execution.id)
+                    self.event_recorder.record_stage_skipped(
+                        stage,
+                        reason="Stage pruned" if message.pruned else "Stage skipped",
+                        source_handler="SkipStageHandler",
                     )
 
         self.with_stage(message, on_stage)

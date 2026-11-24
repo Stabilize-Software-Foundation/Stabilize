@@ -146,12 +146,11 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
                             execution_id=message.execution_id,
                         )
                     )
+                if self.event_recorder:
+                    self.set_event_context(stage.execution.id)
+                    self.event_recorder.record_stage_canceled(stage, source_handler="CancelStageHandler")
             settled["stage"] = stage
             settled["moved"] = moved
-
-            if self.event_recorder:
-                self.set_event_context(stage.execution.id)
-                self.event_recorder.record_stage_canceled(stage, source_handler="CancelStageHandler")
 
             logger.info("Canceled stage %s (%s)", stage.name, stage.id)
 

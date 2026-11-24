@@ -431,8 +431,20 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Yields:
             StoreTransaction with store_stage() and push_message() methods
         """
+        from stabilize.events.txn_scope import (
+            abort_store_transaction,
+            begin_store_transaction,
+            commit_store_transaction,
+        )
+
         from .noop_transaction import NoOpTransaction
 
         txn = NoOpTransaction(self, queue)
-        yield txn
-        txn._flush_messages()
+        begin_store_transaction(None, None)
+        try:
+            yield txn
+            txn._flush_messages()
+        except BaseException:
+            abort_store_transaction()
+            raise
+        commit_store_transaction()

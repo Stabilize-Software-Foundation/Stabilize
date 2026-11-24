@@ -14,7 +14,7 @@ from stabilize.dag.readiness import PRUNED, PredicatePhase, evaluate_readiness
 from stabilize.errors import is_store_unavailable, is_transient
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.handlers.start_stage.starting import StartStageStarting
-from stabilize.models.stage.stage import PLANNING_FAILED
+from stabilize.models.stage.stage import CLAIM_MESSAGE, PLANNING_FAILED
 from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
 from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
 from stabilize.queue.messages import (
@@ -224,6 +224,7 @@ class StartStageHandler(StartStageStarting):
                         "details": {"error": error_str},
                     }
                     fresh_stage.context[PLANNING_FAILED] = True
+                    fresh_stage.context.pop(CLAIM_MESSAGE, None)
 
                     # Atomic: store stage + push CompleteStage together
                     with self.repository.transaction(self.queue) as txn:

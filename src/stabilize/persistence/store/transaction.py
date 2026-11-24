@@ -40,8 +40,12 @@ class StoreTransaction(ABC):
         """
 
     @abstractmethod
-    def update_workflow_status(self, workflow: Workflow) -> None:
-        """Update workflow status within the transaction."""
+    def update_workflow_status(self, workflow: Workflow, *, expected_status: str) -> None:
+        """Write the workflow's status, start and end time over a row that still holds expected_status.
+
+        Raises:
+            ConcurrencyError: the row holds another status, or no row matched; nothing was written.
+        """
 
     def set_config_version(self, workflow_id: str, config_version: str) -> None:
         """Record the configuration fingerprint of a workflow within the transaction."""

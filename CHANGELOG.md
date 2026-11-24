@@ -1,5 +1,99 @@
 # Changelog
 
+## [0.34.6] - 2026-11-24
+
+### Fixed
+
+- **A workflow is completed once (#111, reported by Webmail).** Each leaf stage that finishes sends its
+  own `CompleteWorkflow`. Handlers on different workers read the workflow as RUNNING at the same moment
+  and each completed it. A fan-out of 32 stages on ten workers recorded 7 to 10 `workflow.completed`
+  events for one workflow, on SQLite and on PostgreSQL. A subscriber received that many completions, the
+  workflow's `end_time` was written again by each handler, and `StartWaitingWorkflows` was queued once per
+  handler. The workflow's final status was the same in every case.
+
+  A workflow's status is now written against the status the handler read
+  (`update_workflow_status(workflow, expected_status=...)`). The first handler to write wins, and the
+  others get `ConcurrencyError`, read the workflow again and find it complete. The same guard covers starting,
+  buffering, promoting from the waiting queue, terminating, restarting and resuming. Two deliveries of one
+  `StartWorkflow` handled at once recorded two `workflow.started` events and queued each initial stage
+  twice, and two stages resuming at once recorded two `workflow.resumed`. Each of the two now happens
+  once.
+  `tests/test_workflow_status_guard.py`.
+
+- **Lifecycle events are appended inside the transaction that writes their state (#111).** The event
+  sourcing guide has stated this since 0.27.0, and `CompleteTask` and `CompleteStage` have done it since
+  0.19.0. `StartStage`, `StartTask`, `StartWorkflow`,
+  `StartWaitingWorkflows` and `CancelStage` recorded their event after the commit that queued the next
+  message, and `SkipStage` and `CompleteWorkflow` recorded theirs before the transaction opened. The next
+  message could be handled before its cause was in the log. A failed append, or a process that stopped
+  after the commit, lost `stage.started`, `task.started`, `workflow.started` or `stage.canceled` for good.
+  A skip or a completion that rolled back left its event behind. Each of these events is now the last
+  statement of the transaction that writes the state and queues the next message.
+  `tests/test_event_transaction_order.py`.
+
+- **A stage whose start was interrupted is planned, not skipped past (#111).** `StartStage` marks the
+  stage RUNNING in one transaction, then plans it and queues its first task in a second. When the second
+  did not commit (a transient database error is enough), the redelivered message was ignored because the
+  stage was already RUNNING. The recovery sweep then queued `StartTask` directly, and the task ran with no
+  upstream outputs in its context, no before-stages and no `stage.started`, because only the planner
+  provides them. The sweep
+  did so even while the claiming message was still queued. The stage now carries the id of the message
+  that claimed it until its plan commits. A redelivery of that message resumes the plan. When that
+  message has left the queue unprocessed, the recovery sweep re-issues `StartStage` and the stage is
+  planned by it. A `StartStage` from another upstream that arrives while the claiming message is still
+  queued is ignored as before. `tests/test_half_started_stage.py`.
+
+- **Every way a workflow ends is in the event log (#111).** A workflow canceled before it started, one
+  with no initial stages, and one purged or expired while waiting for a concurrency slot ended CANCELED
+  or TERMINAL with no `workflow.canceled` or `workflow.failed`. They now record it in the transaction that
+  writes the status. A waiting workflow that a user canceled keeps the user's name and reason. Before,
+  the purge overwrote them with `system` and the purge reason. A workflow that expired while waiting is
+  recorded with the expiry reason. `RestartStage` records the workflow's return to RUNNING as a
+  `status.changed`. `tests/test_workflow_terminal_events.py`.
+
+- **Replay names every stage (#111).** Replay took a stage's `ref_id`, `type` and `name` from the stage's
+  first event. Since 0.34.0 that event is the `status.changed` of the claim, which carries none of them,
+  and replay returned every stage unnamed. Replay now fills identity from any event that carries it, for
+  tasks as well, and follows a workflow's `status.changed` events.
+
+- **The duplicate filter's fill check costs the same at any size (#111, reported by Webmail).**
+  `BloomDeduplicator.fill_ratio` counted the set bits by walking the whole array in Python, under the
+  filter's lock, once for every message handled: 4.0 ms on the default 100,000-item filter. The filter
+  now keeps the count as bits are set and `should_reset()` takes 0.2 microseconds. The value is the same
+  exact ratio. `tests/test_bloom_dedup.py`.
+
+- **`examples/benchmark-overhead.py` exits 0 (#111, reported by Webmail).** It stopped with "Missing
+  http_0 in replay" because of the replay fault above. It also kept its databases at fixed paths in
+  `/tmp` and now uses a temporary directory of its own. The examples test listed it as "a module of
+  timing helpers" and never ran it, and it is now one of the examples that test runs.
+
+### Added
+
+- **An engine event appended outside a store transaction is a delivery defect (#111).** While a message
+  is handled, an event with a source handler that is appended with no store transaction open on the
+  thread, or an event held for a transaction the handler never opened, is reported the way a push
+  outside a transaction is. It appears on `processor.delivery_defects`, in the log at ERROR and in
+  `stabilize.delivery.defects`, and it raises `DeliveryContractError` under `STABILIZE_STRICT_DELIVERY=1`. Task
+  progress events are not counted. The test suite fails any test in which one occurs.
+- The stage context key `_claim_message`, registered in `stabilize.models.stage.engine_keys`. A stage
+  holds it from its claim until its plan commits.
+
+### Changed
+
+- `StoreTransaction.update_workflow_status` takes a required keyword `expected_status`. The class is
+  internal, but a store of your own that overrides it must accept the argument. `NoOpTransaction` accepts
+  and ignores it.
+- The default `WorkflowStore.transaction()` opens the same event scope as the SQLite and PostgreSQL
+  stores. A store without transactions of its own now records the events it used to drop, and publishes
+  them after its writes are flushed.
+- With the event store on a separate database, an append that fails now fails the handler's transaction
+  at the seven sites above and the message is retried. `CompleteTask` and `CompleteStage` have behaved
+  this way since 0.19.0.
+
+No schema change and no migration, and no event payload changed. Logs written by 0.34.5 and earlier keep
+the order they were written in. The repository moved to
+https://github.com/Stabilize-Software-Foundation/Stabilize.
+
 ## [0.34.5] - 2026-11-17
 
 ### Fixed

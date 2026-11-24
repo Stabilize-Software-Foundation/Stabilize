@@ -188,7 +188,7 @@ class TestBug3NoOpTransactionPartialFlush:
         mock_workflow = MagicMock()
         mock_stage = MagicMock()
 
-        txn.update_workflow_status(mock_workflow)
+        txn.update_workflow_status(mock_workflow, expected_status="RUNNING")
         txn.store_stage(mock_stage)
 
         # Flush should raise but log context
@@ -221,7 +221,7 @@ class TestBug3NoOpTransactionPartialFlush:
         mock_workflow = MagicMock()
         mock_stage = MagicMock()
 
-        txn.update_workflow_status(mock_workflow)
+        txn.update_workflow_status(mock_workflow, expected_status="RUNNING")
         txn.store_stage(mock_stage)
 
         # Flush should fail

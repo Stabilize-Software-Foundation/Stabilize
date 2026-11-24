@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -46,7 +47,21 @@ def _event(workflow_id: str) -> Event:
 
 
 def _append(store: Any, count: int, prefix: str = "wf") -> list[int]:
-    return [store.append(_event(f"{prefix}-{i}")).sequence for i in range(count)]
+    sequences = [store.append(_event(f"{prefix}-{i}")).sequence for i in range(count)]
+    _wait_until_readable(store, sequences[-1])
+    return sequences
+
+
+def _wait_until_readable(store: Any, sequence: int, timeout: float = 60.0) -> None:
+    if not type(store).__name__.startswith("Postgres"):
+        return
+    appended = int(store.commit_cursor_for_sequence(sequence - 1)[0])
+    deadline = time.monotonic() + timeout
+    while int(store.current_commit_cursor()[0]) <= appended:
+        assert time.monotonic() < deadline, (
+            f"the commit watermark stayed at or below transaction {appended} for {timeout:.0f} s"
+        )
+        time.sleep(0.05)
 
 
 def _poll(manager: SubscriptionManager, times: int = 1) -> None:

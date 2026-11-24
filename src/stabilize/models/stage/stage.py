@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 PLANNING_FAILED = "beforeStagePlanningFailed"
 """Set when planning raised before any task existed to carry the failure."""
 
+CLAIM_MESSAGE = "_claim_message"
+"""The id of the StartStage message that claimed the stage, from the claim until its plan commits."""
+
 
 @dataclass
 class StageExecution(StageNavigationMixin):

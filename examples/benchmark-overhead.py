@@ -8,8 +8,9 @@ Key: Uses HTTP/1.0 to avoid keepalive connection blocking artifacts.
 """
 
 import json
-import os
+import shutil
 import statistics
+import tempfile
 import threading
 import time
 from collections import Counter
@@ -165,11 +166,9 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.tasks.http import HTTPTask
 
-db_path = "/tmp/stabilize_bench.db"
-events_db_path = "/tmp/stabilize_bench_events.db"
-for p in [db_path, events_db_path]:
-    if os.path.exists(p):
-        os.unlink(p)
+work_dir = tempfile.mkdtemp(prefix="stabilize-bench-")
+db_path = f"{work_dir}/stabilize_bench.db"
+events_db_path = f"{work_dir}/stabilize_bench_events.db"
 
 store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
 queue = SqliteQueue(f"sqlite:///{db_path}")
@@ -412,6 +411,4 @@ print(f"""
 
 # Cleanup
 server.shutdown()
-for p in [db_path, events_db_path]:
-    if os.path.exists(p):
-        os.unlink(p)
+shutil.rmtree(work_dir, ignore_errors=True)

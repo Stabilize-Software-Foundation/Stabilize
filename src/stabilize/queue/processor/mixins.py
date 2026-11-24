@@ -13,9 +13,12 @@ from stabilize.events.txn_scope import discard_held
 from stabilize.persistence.committed_marks import (
     DEFECT_LIMIT,
     DeliveryDefect,
-    clear_committed,
+    begin_delivery,
     consume_committed,
     delivery_defects,
+    end_delivery,
+    log_defect,
+    record_dropped_events,
 )
 from stabilize.persistence.tenancy import TenancyModeChanged, bind_tenant
 from stabilize.queue.messages import Message, get_message_type_name
@@ -184,18 +187,20 @@ class QueueProcessorMixin:
 
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
-        clear_committed()
+        begin_delivery()
         try:
             with bind_tenant(getattr(self._store, "tenant", "") or ""):
                 handler.handle(message)
         finally:
             leftover = discard_held()
             if leftover:
+                record_dropped_events(leftover)
                 logger.warning(
                     "%d event(s) held by %s never reached a store transaction and were dropped",
                     leftover,
                     get_message_type_name(message),
                 )
+            end_delivery()
         self._check_delivery(message, message_id)
 
         # Mark message as processed for deduplication
@@ -216,9 +221,11 @@ class QueueProcessorMixin:
         if not reasons:
             return
         kind = get_message_type_name(message)
+        defect = DeliveryDefect(message_type=kind, message_id=message_id, reasons=tuple(reasons))
+        log_defect(defect)
         defects = self.delivery_defects
         if len(defects) < DEFECT_LIMIT:
-            defects.append(DeliveryDefect(message_type=kind, message_id=message_id, reasons=tuple(reasons)))
+            defects.append(defect)
         metrics.increment("stabilize.delivery.defects", message_type=kind)
         logger.error("Delivery contract broken for %s %s: %s", kind, message_id, "; ".join(reasons))
 

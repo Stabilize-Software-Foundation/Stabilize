@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from stabilize.models.status import WorkflowStatus
+
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
-    from stabilize.models.status import WorkflowStatus
     from stabilize.models.workflow import Workflow
 
 
@@ -74,6 +75,32 @@ class EventRecordingMixin:
             source_handler=type(self).__name__,
             held=True,
         )
+
+    def record_workflow_start(self, workflow: Workflow, initial_stage_ids: list[str]) -> None:
+        """workflow.created and workflow.started; call it inside the transaction that moves the workflow to RUNNING."""
+        recorder = self.event_recorder
+        if recorder is None:
+            return
+        self.set_event_context(workflow.id)
+        source = type(self).__name__
+        recorder.record_workflow_created(workflow, source_handler=source)
+        recorder.record_workflow_started(workflow, initial_stage_ids=initial_stage_ids, source_handler=source)
+
+    def record_workflow_end(self, workflow: Workflow, status: WorkflowStatus, error: str | None = None) -> None:
+        """The event for a workflow's final status; call it inside the transaction that writes that status."""
+        recorder = self.event_recorder
+        if recorder is None:
+            return
+        self.set_event_context(workflow.id)
+        source = type(self).__name__
+        if status == WorkflowStatus.SUCCEEDED:
+            recorder.record_workflow_completed(workflow, source_handler=source)
+        elif status == WorkflowStatus.CANCELED:
+            recorder.record_workflow_canceled(workflow, source_handler=source)
+        else:
+            recorder.record_workflow_failed(
+                workflow, error=error or f"Workflow ended with status {status.name}", source_handler=source
+            )
 
     def record_workflow_resumed(self, workflow: Workflow, source_handler: str) -> None:
         recorder = self.event_recorder

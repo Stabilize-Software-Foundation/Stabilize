@@ -212,3 +212,63 @@ class TestGlobalDeduplicator:
         )
 
         assert dedup.expected_items == 50000
+
+
+def _set_bit_ratio(dedup: BloomDeduplicator) -> float:
+    return int.from_bytes(bytes(dedup._bit_array), "little").bit_count() / dedup._size
+
+
+def _seconds_per_should_reset(expected_items: int, calls: int) -> float:
+    import time
+
+    dedup = BloomDeduplicator(expected_items=expected_items)
+    for i in range(200):
+        dedup.mark_seen(f"message-{i}")
+    best = float("inf")
+    for _ in range(3):
+        started = time.perf_counter()
+        for _ in range(calls):
+            dedup.should_reset(threshold=0.7)
+        best = min(best, time.perf_counter() - started)
+    return best / calls
+
+
+class TestFillRatio:
+    def test_fill_ratio_is_the_exact_share_of_set_bits(self) -> None:
+        dedup = BloomDeduplicator(expected_items=500)
+        assert dedup.fill_ratio == 0.0
+
+        for i in range(300):
+            dedup.mark_seen(f"message-{i}")
+        assert 0.0 < dedup.fill_ratio == _set_bit_ratio(dedup)
+
+        for i in range(300):
+            dedup.mark_seen(f"message-{i}")
+        assert dedup.fill_ratio == _set_bit_ratio(dedup), "marking an id again changed the fill ratio"
+
+        dedup.hydrate(f"stored-{i}" for i in range(400))
+        assert dedup.fill_ratio == _set_bit_ratio(dedup), "hydrate left the fill ratio off the bit array"
+
+        dedup.reset()
+        assert dedup.fill_ratio == 0.0 == _set_bit_ratio(dedup)
+
+        dedup.mark_seen("after-reset")
+        assert 0.0 < dedup.fill_ratio == _set_bit_ratio(dedup)
+
+    def test_should_reset_reports_a_filter_past_its_threshold(self) -> None:
+        dedup = BloomDeduplicator(expected_items=100)
+        assert not dedup.should_reset(threshold=0.7)
+        added = 0
+        while _set_bit_ratio(dedup) <= 0.7:
+            dedup.mark_seen(f"message-{added}")
+            added += 1
+        assert dedup.should_reset(threshold=0.7), f"not reported full at {_set_bit_ratio(dedup):.3f} after {added} ids"
+        assert not dedup.should_reset(threshold=0.99)
+
+    def test_the_cost_of_should_reset_does_not_grow_with_the_filter(self) -> None:
+        small = _seconds_per_should_reset(1_000, calls=20_000)
+        large = _seconds_per_should_reset(500_000, calls=100)
+        assert large <= small * 20, (
+            f"should_reset on a 500,000-item filter costs {large * 1e6:.1f} us against {small * 1e6:.1f} us "
+            f"on a 1,000-item filter ({large / small:.0f}x)"
+        )

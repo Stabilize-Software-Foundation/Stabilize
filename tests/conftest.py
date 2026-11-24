@@ -128,6 +128,35 @@ def reset_event_state() -> Generator[None, None, None]:
     reset_event_migrator()
 
 
+@pytest.fixture(autouse=True)
+def no_event_outside_its_transaction(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    try:
+        from stabilize.persistence.committed_marks import clear_recent_defects, recent_defects
+    except ImportError:
+        import stabilize
+
+        if tuple(int(part) for part in stabilize.__version__.split(".")[:3]) >= (0, 34, 6):
+            raise
+        yield
+        return
+
+    clear_recent_defects()
+    yield
+    if request.node.get_closest_marker("delivery_defects"):
+        return
+    broken = [
+        f"{defect.message_type} {defect.message_id}: {reason}"
+        for defect in recent_defects()
+        for reason in defect.reasons
+        if "was recorded outside any store transaction" in reason or "held event(s) never reached" in reason
+    ]
+    if broken:
+        pytest.fail(
+            f"{len(broken)} event(s) left the transaction that writes their state: " + "; ".join(broken[:8]),
+            pytrace=False,
+        )
+
+
 # =============================================================================
 # Shared Test Task Implementations
 # =============================================================================

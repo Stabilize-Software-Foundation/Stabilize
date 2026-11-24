@@ -98,38 +98,8 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                 # Not ready to complete - stages still running
                 return
 
-            # Update execution status
-            self.set_workflow_status(execution, status)
-            execution.end_time = self.current_time_millis()
-            if execution.start_time is not None:
-                metrics.histogram(
-                    "workflow_duration_seconds",
-                    (execution.end_time - execution.start_time) / 1000.0,
-                    application=execution.application,
-                    status=status.name,
-                )
-
-            logger.info("Execution %s completed with status %s", execution.id, status)
-
-            # Record event if event recorder is configured
-            if self.event_recorder:
-                self.set_event_context(execution.id)
-                if status == WorkflowStatus.SUCCEEDED:
-                    self.event_recorder.record_workflow_completed(
-                        execution,
-                        source_handler="CompleteWorkflowHandler",
-                    )
-                elif status == WorkflowStatus.CANCELED:
-                    self.event_recorder.record_workflow_canceled(
-                        execution,
-                        source_handler="CompleteWorkflowHandler",
-                    )
-                else:
-                    self.event_recorder.record_workflow_failed(
-                        execution,
-                        error=f"Workflow ended with status {status.name}",
-                        source_handler="CompleteWorkflowHandler",
-                    )
+            end_time = self.current_time_millis()
+            self.set_event_context(execution.id)
 
             # Collect running stages to cancel if not successful
             running_stages = []
@@ -139,9 +109,6 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             never_started: list[StageExecution] = []
             if status == WorkflowStatus.CANCELED and execution.is_canceled:
                 never_started = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.NOT_STARTED]
-                for stage in never_started:
-                    self.set_stage_status(stage, WorkflowStatus.CANCELED)
-                    stage.end_time = execution.end_time
 
             # Save pipeline_config_id before cleanup
             pipeline_config_id = execution.pipeline_config_id
@@ -149,8 +116,11 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
 
             # Atomic: update execution status + cancel stages + start waiting workflows
             with self.repository.transaction(self.queue) as txn:
-                txn.update_workflow_status(execution)
+                execution.end_time = end_time
+                self.claim_workflow_status(txn, execution, status)
                 for stage in never_started:
+                    self.set_stage_status(stage, WorkflowStatus.CANCELED)
+                    stage.end_time = end_time
                     txn.store_stage(stage)
 
                 # Message deduplication
@@ -179,6 +149,17 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                             purge_queue=not keep_waiting_pipelines,
                         )
                     )
+
+                self.record_workflow_end(execution, status)
+
+            if execution.start_time is not None:
+                metrics.histogram(
+                    "workflow_duration_seconds",
+                    (end_time - execution.start_time) / 1000.0,
+                    application=execution.application,
+                    status=status.name,
+                )
+            logger.info("Execution %s completed with status %s", execution.id, status)
 
             # Clean up memory references after workflow completes
             # This breaks circular references to help garbage collection

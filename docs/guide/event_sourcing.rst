@@ -418,6 +418,25 @@ It takes ``--tenant`` or ``--all-tenants`` in tenancy mode and exits non-zero
 when a subscription is behind.
 
 **Transactionality.** Events are appended inside the same transaction that
-commits the state they describe, so a rollback cannot leave a phantom event
-behind. The exception is an event store on a *different* database from the
-workflow store, where no shared transaction exists.
+commits the state they describe, and a rollback removes them with it. A handler
+appends its lifecycle event inside the transaction that queues
+the next message. Another worker therefore cannot handle that message before the
+event is in the log. This holds for ``workflow.created``, ``workflow.started``,
+``workflow.completed``, ``workflow.failed``, ``workflow.canceled``,
+``stage.started``, ``stage.completed``, ``stage.failed``, ``stage.skipped``,
+``stage.canceled``, ``task.started``, ``task.completed`` and ``task.failed``.
+
+An event store on a *different* database from the workflow store shares no
+transaction with it. The append still comes before the commit. A failed append
+fails the transaction, and the message is retried. A transaction that rolls back
+after the append leaves that event in the log.
+
+While a message is handled, an engine event appended with no store transaction
+open on the thread is a delivery defect. :doc:`error_handling` describes how the
+processor reports one.
+
+Logs written by 0.34.5 and earlier are not rewritten. They can hold more than one
+completion event for a workflow, and no ending event for a workflow that was
+canceled before it started or while it waited for a concurrency slot. Replay
+applies events in sequence order, and the workflow store remains the authority on
+current state.

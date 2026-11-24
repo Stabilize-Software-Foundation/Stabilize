@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.34.5"
+version = "0.34.6"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -116,9 +116,9 @@ dev = [
 stabilize = "stabilize.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/rodmena-limited/stabilize"
-Repository = "https://github.com/rodmena-limited/stabilize"
-Issues = "https://github.com/rodmena-limited/stabilize/issues"
+Homepage = "https://github.com/Stabilize-Software-Foundation/Stabilize"
+Repository = "https://github.com/Stabilize-Software-Foundation/Stabilize"
+Issues = "https://github.com/Stabilize-Software-Foundation/Stabilize/issues"
 
 [build-system]
 requires = ["hatchling==1.33.0"]
@@ -221,4 +221,5 @@ markers = [
     "stress: marks tests as stress tests (may take longer to run)",
     "race_condition: marks tests that test for race conditions",
     "both_backends: marks tests that explicitly test both SQLite and PostgreSQL backends",
+    "delivery_defects: marks tests that provoke a delivery defect on purpose",
 ]

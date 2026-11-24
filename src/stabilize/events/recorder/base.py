@@ -81,6 +81,10 @@ class EventRecorderBase:
             # Join the caller's open store transaction: the event commits or
             # rolls back together with the state it describes.
             connection = scope.connection
+        elif scope is None and connection is None and getattr(event.metadata, "source_handler", None):
+            from stabilize.persistence.committed_marks import record_bare_event
+
+            record_bare_event(event.event_type.value)
 
         try:
             recorded = self._event_store.append(event, connection=connection)

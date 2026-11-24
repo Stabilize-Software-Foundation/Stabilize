@@ -17,6 +17,7 @@ HEADLESS = [
     "dynamic-routing-example.py",
     "event-sourcing-example.py",
     "golden-standard.py",
+    "benchmark-overhead.py",
 ]
 
 NEEDS = {
@@ -26,7 +27,6 @@ NEEDS = {
     "lats-coding-agent.py": "an LLM endpoint",
     "highway-integration-example.py": "the Highway service",
     "ssh-example.py": "an SSH server",
-    "benchmark-overhead.py": "no entry point; a module of timing helpers",
 }
 
 

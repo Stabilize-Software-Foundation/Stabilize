@@ -208,11 +208,7 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
                 reset_stage_for_retry(child, task_registry=self.task_registry)
             dropped_ids = {s.id for s in dropped}
             execution.stages[:] = [s for s in execution.stages if s.id not in dropped_ids]
-            execution_changed = False
-            if execution.status.is_complete:
-                execution.update_status(WorkflowStatus.RUNNING)
-                execution.end_time = None
-                execution_changed = True
+            reopen = execution.status.is_complete
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
                 for child in kept:
@@ -224,8 +220,9 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
                     txn.release_claims(execution.id, stage_id)
                 for reset in (stage, *children):
                     txn.discard_signals(execution.id, reset.ref_id)
-                if execution_changed:
-                    txn.update_workflow_status(execution)
+                if reopen:
+                    execution.end_time = None
+                    self.claim_workflow_status(txn, execution, WorkflowStatus.RUNNING, validate=False)
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,
@@ -311,7 +308,7 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
                 if execution_changed:
-                    txn.update_workflow_status(execution)
+                    txn.update_workflow_status(execution, expected_status=WorkflowStatus.PAUSED.name)
                     self.record_workflow_resumed(execution, "ResumeStage")
                 if message.message_id:
                     txn.mark_message_processed(
