@@ -7,8 +7,9 @@ Run it once per release, then compare the two documents:
     NEW/bin/python audit/evaluations/bench_processor.py --out new.json --fleet
     python audit/evaluations/bench_processor.py --compare old.json new.json
 
-The comparison exits 1 unless the old release shows the ceiling and the new one clears the
-targets, so a run that cannot see the problem cannot pass. Needs STABILIZE_PROBE_DSN.
+The comparison (bench_compare.py) exits 1 unless the old release shows the ceiling and the new
+one clears the counted targets and the paced latency. The backlog rate and the idle-workflow
+median are printed with their ratio to the old release. Needs STABILIZE_PROBE_DSN.
 """
 
 from __future__ import annotations
@@ -22,140 +23,25 @@ import sys
 import tempfile
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-TENANT = "bench"
-TASK_AT: dict[str, float] = {}
-TASK_LOCK = threading.Lock()
+from bench_common import (
+    TASK_AT,
+    _await_all,
+    _drop,
+    _parts,
+    _percentile,
+    _processor,
+    _registry,
+    _succeeded,
+    _tenancy_database,
+    _workflow,
+)
+from bench_compare import compare
 
-
-def _cli(*args: str) -> None:
-    done = subprocess.run([sys.executable, "-m", "stabilize.cli.main", *args], capture_output=True, text=True)
-    if done.returncode != 0:
-        raise SystemExit(f"stabilize {' '.join(args[:2])} failed: {done.stdout}\n{done.stderr}")
-
-
-def _tenancy_database() -> str:
-    from _backends import dedicated_dsn, skip
-
-    base = os.environ.get("STABILIZE_PROBE_DSN")
-    if not base:
-        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN)")
-    dsn = dedicated_dsn(str(base), f"bench_{uuid.uuid4().hex[:8]}")
-    _cli("mg-up", "--db-url", dsn)
-    _cli("mg-tenancy", "enable", "--db-url", dsn)
-    return dsn
-
-
-def _drop(dsn: str) -> None:
-    from urllib.parse import urlsplit
-
-    import psycopg
-
-    name = urlsplit(dsn).path.lstrip("/")
-    with psycopg.connect(str(os.environ["STABILIZE_PROBE_DSN"]), autocommit=True) as conn:
-        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-
-
-def _parts(dsn: str) -> tuple[Any, Any]:
-    from stabilize.persistence.postgres import PostgresWorkflowStore
-    from stabilize.queue import PostgresQueue
-
-    return PostgresWorkflowStore(dsn, tenant=TENANT), PostgresQueue(dsn, table_name="queue_messages", tenant=TENANT)
-
-
-def _registry(effects: str | None = None) -> Any:
-    from stabilize import Task, TaskRegistry, TaskResult
-    from stabilize.models.stage import StageExecution
-
-    class Stamp(Task):
-        def execute(self, stage: StageExecution) -> TaskResult:
-            now = time.monotonic()
-            workflow_id = str(stage.execution.id)
-            with TASK_LOCK:
-                TASK_AT.setdefault(workflow_id, now)
-            if effects is not None:
-                with open(effects, "a") as fh:
-                    fh.write(workflow_id + "\n")
-            return TaskResult.success()
-
-    registry = TaskRegistry()
-    registry.register("bench_stamp", Stamp)
-    return registry
-
-
-def _workflow(stages: int = 1) -> Any:
-    from stabilize.models.stage import StageExecution
-    from stabilize.models.task import TaskExecution
-    from stabilize.models.workflow import Workflow
-
-    return Workflow.create(
-        application="bench",
-        name="w",
-        stages=[
-            StageExecution(
-                ref_id=f"s{i}",
-                type="bench_stamp",
-                name=f"S{i}",
-                requisite_stage_ref_ids=set() if i == 0 else {f"s{i - 1}"},
-                tasks=[
-                    TaskExecution.create(name="t", implementing_class="bench_stamp", stage_start=True, stage_end=True)
-                ],
-            )
-            for i in range(stages)
-        ],
-    )
-
-
-def _processor(store: Any, queue: Any, workers: int, poll_ms: int, effects: str | None = None) -> Any:
-    from stabilize import QueueProcessor
-    from stabilize.queue.processor.config import QueueProcessorConfig
-
-    return QueueProcessor(
-        queue,
-        config=QueueProcessorConfig(poll_frequency_ms=poll_ms, max_workers=workers),
-        store=store,
-        task_registry=_registry(effects),
-    )
-
-
-def _succeeded(store: Any, workflow_id: str) -> bool:
-    return bool(store.retrieve(workflow_id).status.name == "SUCCEEDED")
-
-
-def _drained(queue: Any) -> bool:
-    counts = queue.counts()
-    return bool(counts.pending == 0 and counts.processing == 0)
-
-
-def _await_all(store: Any, queue: Any, ids: list[str], seconds: float) -> float:
-    """Wait until the queue holds no message, with one count per sweep, then check every workflow once.
-
-    The first version of this benchmark read the status of every pending workflow in a loop. With 500
-    to 2,000 workflows that loop put more load on PostgreSQL and on the interpreter than the engine
-    did, and the rates it reported were its own.
-    """
-    deadline = time.monotonic() + seconds
-    empty = 0
-    while empty < 2:
-        if time.monotonic() >= deadline:
-            raise SystemExit(f"the queue did not drain in {seconds} s: {queue.counts()}")
-        empty = empty + 1 if _drained(queue) else 0
-        time.sleep(0.05)
-    end = time.monotonic()
-    unfinished = [i for i in ids if not _succeeded(store, i)]
-    if unfinished:
-        raise SystemExit(f"{len(unfinished)} of {len(ids)} workflows are not SUCCEEDED although the queue is empty")
-    return end
-
-
-def _percentile(values: list[float], fraction: float) -> float:
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
 
 
 def paced(dsn: str, rate: float = 5.0, seconds: float = 30.0, workers: int = 4, poll_ms: int = 250) -> dict[str, Any]:
@@ -533,75 +419,6 @@ def measure(with_fleet: bool, only: set[str] | None = None) -> dict[str, Any]:
         finally:
             _drop(dsn)
     return result
-
-
-def compare(old_path: str, new_path: str) -> int:
-    old = json.loads(Path(old_path).read_text())
-    new = json.loads(Path(new_path).read_text())
-    checks: list[tuple[str, bool, str]] = []
-
-    def check(label: str, ok: bool, detail: str) -> None:
-        checks.append((label, ok, detail))
-
-    op, np_ = old["paced"]["p95_s"], new["paced"]["p95_s"]
-    check("old release shows the ceiling: paced p95 >= 5 s", op >= 5.0, f"{old['version']} p95 {op} s")
-    check("paced p95 <= 1.0 s", np_ <= 1.0, f"{new['version']} p95 {np_} s (was {op} s)")
-    os_, ns = old["single"]["median_total_s"], new["single"]["median_total_s"]
-    check("one idle workflow: median at most a quarter", ns <= os_ / 4, f"{ns} s (was {os_} s)")
-    orate, nrate = old["preloaded"]["per_second"], new["preloaded"]["per_second"]
-    check("500 preloaded: at least 3 times the rate", nrate >= 3 * orate, f"{nrate}/s (was {orate}/s)")
-    oc = old["threaded_counts"]["writing_commits_per_workflow"]
-    nc = new["threaded_counts"]["writing_commits_per_workflow"]
-    check("writing commits per workflow: at least 13 fewer", nc <= oc - 13, f"{nc} (was {oc})")
-    opoll = old["threaded_counts"]["polled_per_workflow"]
-    npoll = new["threaded_counts"]["polled_per_workflow"]
-    check("old release polls each message: >= 6.5 polled per workflow", opoll >= 6.5, f"{opoll}")
-    check("polled messages per workflow <= 1.2", npoll <= 1.2, f"{npoll} (was {opoll})")
-    one, extra = new["synchronous_statements"]["one_stage"], new["synchronous_statements"]["each_extra_stage"]
-    old_one, old_extra = old["synchronous_statements"]["one_stage"], old["synchronous_statements"]["each_extra_stage"]
-    check("tenancy statements, one stage: at least 28 fewer", one <= old_one - 28, f"{one} (was {old_one})")
-    check("tenancy statements, each extra stage: at least 20 fewer", extra <= old_extra - 20, f"{extra} (was {old_extra})")
-    for name in ("fleet_2", "fleet_4"):
-        if name not in new:
-            check(f"{name} ran", False, "missing from the new run; pass --fleet")
-            continue
-        fleet_result = new[name]
-        once = fleet_result["effects_repeated"] == 0 and fleet_result["effects_missing"] == 0
-        check(
-            f"{name}: each effect present once",
-            once,
-            f"{fleet_result['effects_repeated']} repeated, {fleet_result['effects_missing']} missing, "
-            f"{fleet_result['per_second']}/s",
-        )
-    width = max(len(label) for label, _, _ in checks)
-    for label, ok, detail in checks:
-        print(f"[{'PASS' if ok else 'FAIL'}] {label.ljust(width)}  {detail}")
-    _report_c_driver(Path(old_path).parent)
-    failed = [label for label, ok, _ in checks if not ok]
-    print(f"VERDICT: {'PASS' if not failed else 'FAIL'} ({len(checks) - len(failed)} of {len(checks)})")
-    return 1 if failed else 0
-
-
-def _report_c_driver(directory: Path) -> None:
-    """Print, without judging, the runs made with psycopg's C implementation when both exist."""
-    old_c, new_c = directory / "bench-old-c.json", directory / "bench-new-c.json"
-    if not (old_c.exists() and new_c.exists()):
-        print("C implementation: not measured in this job")
-        return
-    old = json.loads(old_c.read_text())
-    new = json.loads(new_c.read_text())
-    print(f"C implementation ({old['version']} on {old['driver']}, {new['version']} on {new['driver']}), reported only:")
-    rows = [
-        ("CPU ms per message, synchronous", "unprofiled", "cpu_ms_per_message"),
-        ("wall ms per message, synchronous", "unprofiled", "wall_ms_per_message"),
-        ("one idle workflow, median s", "single", "median_total_s"),
-        ("500 preloaded, workflows per second", "preloaded", "per_second"),
-        ("paced p95 s", "paced", "p95_s"),
-    ]
-    for label, scenario, key in rows:
-        before = old.get(scenario, {}).get(key)
-        after = new.get(scenario, {}).get(key)
-        print(f"  {label.ljust(38)} {before} -> {after}")
 
 
 def main() -> int:
