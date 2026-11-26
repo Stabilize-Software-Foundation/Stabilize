@@ -496,10 +496,18 @@ def unprofiled(dsn: str, workflows: int = 60) -> dict[str, Any]:
     }
 
 
-def measure(with_fleet: bool) -> dict[str, Any]:
+def measure(with_fleet: bool, only: set[str] | None = None) -> dict[str, Any]:
+    import psycopg
+
     import stabilize
 
-    result: dict[str, Any] = {"version": stabilize.__version__, "file": stabilize.__file__}
+    result: dict[str, Any] = {
+        "version": stabilize.__version__,
+        "file": stabilize.__file__,
+        "driver": psycopg.pq.__impl__,
+        "psycopg": psycopg.__version__,
+    }
+    print(f"stabilize {result['version']}, psycopg {result['psycopg']} ({result['driver']})", flush=True)
     scenarios: list[tuple[str, Any]] = [
         ("unprofiled", unprofiled),
         ("synchronous_statements", synchronous_statements),
@@ -513,6 +521,8 @@ def measure(with_fleet: bool) -> dict[str, Any]:
         scenarios.append(("fleet_2", lambda dsn: fleet(dsn, 2)))
         scenarios.append(("fleet_4", lambda dsn: fleet(dsn, 4)))
     for name, scenario in scenarios:
+        if only is not None and name not in only:
+            continue
         dsn = _tenancy_database()
         try:
             TASK_AT.clear()
@@ -577,12 +587,13 @@ def main() -> int:
     parser.add_argument("--fleet", action="store_true")
     parser.add_argument("--compare", nargs=2)
     parser.add_argument("--fleet-child", nargs=3)
+    parser.add_argument("--only", help="comma-separated scenario names to run")
     args = parser.parse_args()
     if args.fleet_child:
         return _fleet_child(args.fleet_child[0], args.fleet_child[1], float(args.fleet_child[2]))
     if args.compare:
         return compare(args.compare[0], args.compare[1])
-    result = measure(args.fleet)
+    result = measure(args.fleet, set(args.only.split(",")) if args.only else None)
     text = json.dumps(result, indent=2)
     if args.out:
         Path(args.out).write_text(text)
