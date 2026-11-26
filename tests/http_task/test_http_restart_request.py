@@ -256,3 +256,16 @@ def test_a_jump_into_a_failed_http_stage_sends_the_declared_headers_and_the_body
         f"a jump into a failed stage built its request from the failed response: {request.header_items()}"
     )
     assert body == b"set by the jump"
+
+
+def test_a_restarted_http_stage_fills_its_url_template_again(stack: Stack, failing_server: str) -> None:
+    first, after_failure, second = _fail_then_restart(
+        stack, edit={"base": f"{failing_server}/v2"}, url="{base}/fail", base=failing_server
+    )
+
+    assert first["path"] == "/fail"
+    assert after_failure["url"] == f"{failing_server}/fail"
+    assert [request["path"] for request in second] == ["/v2/fail"], (
+        f"the restarted stage requested the url of the failed attempt and not its template: "
+        f"{[request['path'] for request in second]}"
+    )

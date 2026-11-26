@@ -13,3 +13,18 @@ tests/test_declared_context_on_replan.py::test_a_restarted_stage_keeps_the_value
 tests/test_declared_context_on_replan.py::test_a_restarted_http_stage_downstream_of_an_http_stage_requests_its_own_url|the restarted stage did not request the url it declared
 tests/test_deferred_choice_loser_outputs.py::test_a_member_that_finished_and_then_lost_passes_nothing_downstream|a member that lost the deferred choice kept its outputs|tests/test_deferred_choice_loser_outputs.py::test_the_winner_of_the_choice_passes_its_outputs_downstream
 tests/test_deferred_choice_loser_outputs.py::test_a_finished_member_pruned_by_the_winner_passes_nothing_downstream|a finished member pruned by the winner kept its outputs
+tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_fills_its_url_template_again|the restarted stage requested the url of the failed attempt and not its template
+tests/http_task/test_http_failures.py::test_a_request_with_no_url_is_an_invalid_request|the failed result carries no error code from the documented set|tests/http_task/test_http_failures.py::test_a_complete_body_is_still_a_success
+tests/http_task/test_http_failures.py::test_an_address_refused_before_the_request_is_a_blocked_address|the failed result carries no error code from the documented set
+tests/http_task/test_http_failures.py::test_a_peer_refused_at_connect_time_is_a_blocked_address_and_is_not_tried_again|a connect-time refusal was tried again|tests/http_task/test_http_failures.py::test_a_timeout_is_still_tried_again
+tests/http_task/test_http_failures.py::test_a_body_over_the_cap_is_response_too_large|the failed result carries no error code from the documented set
+tests/http_task/test_http_failures.py::test_a_status_the_stage_does_not_accept_is_http_status|the failed result carries no error code from the documented set
+tests/http_task/test_http_failures.py::test_a_failure_the_workflow_continues_past_carries_the_code_too|the failed result carries no error code from the documented set
+tests/http_task/test_http_failures.py::test_no_answer_within_the_timeout_is_a_timeout|the failed result carries no error code from the documented set
+tests/http_task/test_http_failures.py::test_a_port_with_no_listener_is_connection_failed|the failed result carries no error code from the documented set
+tests/http_task/test_http_failures.py::test_a_body_that_stalls_past_the_timeout_is_a_result_and_not_a_raise|a failed request escaped execute() as an exception and not as a result
+tests/http_task/test_http_failures.py::test_a_reply_that_is_not_http_is_a_result_and_not_a_raise|a failed request escaped execute() as an exception and not as a result
+tests/http_task/test_http_failures.py::test_a_body_shorter_than_its_content_length_is_a_failure|a body of 10 bytes was accepted for a Content-Length of 100
+tests/http_task/test_http_failures.py::test_a_restarted_stage_that_succeeds_shows_nothing_of_its_failed_attempt[by-name]|a stage that succeeded after a restart still shows its failed attempt
+tests/http_task/test_http_failures.py::test_a_restarted_stage_that_succeeds_shows_nothing_of_its_failed_attempt[by-class-path]|a stage that succeeded after a restart still shows its failed attempt
+tests/http_task/test_http_upstream_keys.py::test_a_stage_planned_again_still_sends_the_headers_it_declared|on a second plan the stage's declared value is the context value
