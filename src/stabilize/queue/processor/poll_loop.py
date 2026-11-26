@@ -59,10 +59,14 @@ class WakeState:
             return True
 
 
+def offers(queue: Any, name: str) -> bool:
+    """Whether the queue's class defines *name*; an attribute a test double invents on access does not count."""
+    return callable(getattr(type(queue), name, None))
+
+
 def poll_many(queue: Any, limit: int) -> list[Message]:
-    many = getattr(queue, "poll_many", None)
-    if callable(many):
-        return list(many(limit))
+    if offers(queue, "poll_many"):
+        return list(queue.poll_many(limit))
     polled: list[Message] = []
     while len(polled) < limit:
         message = queue.poll_one()
@@ -75,9 +79,8 @@ def poll_many(queue: Any, limit: int) -> list[Message]:
 def release(queue: Any, message: Message) -> None:
     from datetime import timedelta
 
-    hand_back = getattr(queue, "release", None)
-    if callable(hand_back):
-        hand_back(message)
+    if offers(queue, "release"):
+        queue.release(message)
     else:
         queue.reschedule(message, timedelta(0))
 
@@ -92,6 +95,7 @@ class PollLoopMixin:
     _saturated: bool
     _wake: WakeState
     _stop_event: threading.Event
+    _idle_timed_out: bool
 
     if TYPE_CHECKING:
 
@@ -102,6 +106,10 @@ class PollLoopMixin:
         def _check_dlq(self) -> None: ...
 
         def sample_metrics(self) -> None: ...
+
+        def _idle_seconds(self) -> float: ...
+
+        def _judge_poll(self, polled: list[Message]) -> None: ...
 
     def _reserve(self) -> int:
         with self._lock:
@@ -142,9 +150,6 @@ class PollLoopMixin:
         if waiting:
             self._wake.signal()
 
-    def _idle_seconds(self) -> float:
-        return float(self.config.poll_frequency_ms) / 1000.0
-
     def _poll_loop(self) -> None:
         poll_interval = float(self.config.poll_frequency_ms) / 1000.0
         dlq_interval = getattr(self.config, "dlq_check_interval_seconds", 0.0)
@@ -167,6 +172,7 @@ class PollLoopMixin:
                     continue
                 self._wake.begin_poll()
                 polled = self._claim(free)
+                self._judge_poll(polled)
                 for index, message in enumerate(polled):
                     try:
                         self._submit_message_internal(message)
@@ -174,7 +180,7 @@ class PollLoopMixin:
                         self._abandon(polled[index + 1 :])
                         raise
                 if len(polled) < free:
-                    self._wake.wait(self._idle_seconds())
+                    self._idle_timed_out = not self._wake.wait(self._idle_seconds())
 
             except TenancyModeChanged as e:
                 self._latch(e)

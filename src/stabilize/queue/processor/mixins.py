@@ -167,9 +167,8 @@ class QueueProcessorMixin:
             # re-execute on redelivery. The negative-cache fast path is
             # therefore opt-in via dedup_trust_negative_cache.
             trust_negative = getattr(self.config, "dedup_trust_negative_cache", False)
-            first_delivery = getattr(message, "attempts", None) == 1 and bool(
-                getattr(self.queue, "counts_deliveries", False)
-            )
+            counted = getattr(type(self.queue), "counts_deliveries", False) is True
+            first_delivery = counted and getattr(message, "attempts", None) == 1
             durable_check = not first_delivery and (
                 dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative)
             )
@@ -225,9 +224,8 @@ class QueueProcessorMixin:
     def _settle_or_ack(self, message: Message) -> None:
         message_id = getattr(message, "message_id", None)
         if message_id and consume_acked(message_id):
-            settle = getattr(self.queue, "settle", None)
-            if callable(settle):
-                settle(message)
+            if callable(getattr(type(self.queue), "settle", None)):
+                self.queue.settle(message)
             return
         self.queue.ack(message)
 

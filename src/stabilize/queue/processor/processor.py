@@ -24,10 +24,12 @@ from stabilize.queue.messages import Message
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.drain import DrainResult, SynchronousDrainMixin
 from stabilize.queue.processor.handler_base import MessageHandler
+from stabilize.queue.processor.idle import IdlePollMixin
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.queue.processor.poll_loop import PollLoopMixin, WakeState
 from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.queue.processor.submission import MessageSubmissionMixin
+from stabilize.queue.processor.worker_identity import ReclaimResult, reclaim
 from stabilize.recovery import RecoverySummary
 from stabilize.threads import in_context
 
@@ -47,7 +49,9 @@ logger = logging.getLogger(__name__)
 M = TypeVar("M", bound=Message)
 
 
-class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissionMixin, PollLoopMixin):
+class QueueProcessor(
+    QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissionMixin, IdlePollMixin, PollLoopMixin
+):
     """Processes messages from a queue using registered handlers.
 
     The processor polls the queue at regular intervals and dispatches
@@ -129,12 +133,17 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         self._wake = WakeState()
         self._stop_event = threading.Event()
         self._wake_key: Any = None
+        self._listener: Any = None
+        self._guard_until = 0.0
+        self._idle_timed_out = False
+        self._stretched_wait = False
         self._in_flight: set[str] = set()
         self._in_flight_lock = threading.Lock()
         self._last_dlq_check = 0.0
         self.delivery_defects: list[DeliveryDefect] = []
         self.last_drain = DrainResult()
         self.last_recovery = RecoverySummary()
+        self.last_reclaim = ReclaimResult()
 
         # Auto-register default handlers when both store and task_registry are provided
         if store is not None and task_registry is not None:
@@ -233,6 +242,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             raise self._fault
         if self._running:
             return
+        self.last_reclaim = reclaim(self.queue)
+        self._start_listener()
 
         # Opt-in: recover interrupted workflows once before we begin polling, so
         # re-queued work is picked up immediately. Never let recovery failure
@@ -285,6 +296,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         self._stop_event.set()
         self._wake.signal()
         self._unsubscribe_wake()
+        self._stop_listener()
 
         if self._poll_thread:
             self._poll_thread.join(timeout=5.0)
@@ -321,8 +333,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
     def _subscribe_wake(self) -> None:
         from stabilize.queue import wake
 
-        key = getattr(self.queue, "wake_key", None)
-        self._wake_key = key() if callable(key) else None
+        self._wake_key = self.queue.wake_key() if callable(getattr(type(self.queue), "wake_key", None)) else None
         wake.subscribe(self._wake_key, self._wake.on_announce)
 
     def _unsubscribe_wake(self) -> None:

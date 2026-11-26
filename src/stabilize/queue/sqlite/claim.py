@@ -39,7 +39,6 @@ class SqliteClaimMixin:
     connection_string: str
     lock_duration: timedelta
     max_attempts: int
-    _manager: Any
     _pending: dict[int, dict[str, Any]]
 
     if TYPE_CHECKING:
@@ -53,7 +52,8 @@ class SqliteClaimMixin:
         def announce_ready(self, due_in: float = 0.0) -> None: ...
 
     def wake_key(self) -> Hashable | None:
-        return sqlite_wake_key(self._manager, self.connection_string, self.table_name, self.tenant)
+        manager = getattr(self, "_manager", None)
+        return sqlite_wake_key(manager, self.connection_string, self.table_name, self.tenant)
 
     def poll_one(self) -> Message | None:
         """Poll for a single message, claimed by an optimistic update on the row's version."""

@@ -53,9 +53,14 @@ class TestPoolOptionsPassthrough:
         manager.get_postgres_pool(DSN)
         assert len(_FakePool.instances) == 1
 
-    def test_default_pool_sets_no_statement_or_lock_timeout(self, manager: ConnectionManager) -> None:
-        """The documented default: server settings are inherited."""
+    def test_default_pool_sets_a_lock_timeout_and_no_statement_timeout(self, manager: ConnectionManager) -> None:
+        """The documented default from 0.35.0: a 30 s lock_timeout, nothing else."""
         manager.get_postgres_pool(DSN)
+        kwargs = _FakePool.instances[0].kwargs["kwargs"]
+        assert kwargs["options"] == "-c lock_timeout=30000"
+
+    def test_without_a_lock_timeout_the_server_settings_are_inherited(self, manager: ConnectionManager) -> None:
+        manager.get_postgres_pool(DSN, options=PoolOptions(lock_timeout=None))
         kwargs = _FakePool.instances[0].kwargs["kwargs"]
         assert "options" not in kwargs
 

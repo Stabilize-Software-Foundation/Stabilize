@@ -21,12 +21,8 @@ if TYPE_CHECKING:
 from stabilize.persistence.borrow_hook import borrow_hook_pool_class, engine_connection_class
 from stabilize.persistence.floors import require_sqlite_floor
 from stabilize.persistence.pool_options import DEFAULT_POOL_OPTIONS, PoolOptions
-from stabilize.persistence.pool_timeouts import (
-    FINDINGS_ATTRIBUTE,
-    checking_configure,
-    expected_timeouts,
-    merged_options,
-)
+from stabilize.persistence.pool_timeouts import EXPECTED_ATTRIBUTE, expected_timeouts, merged_options
+from stabilize.persistence.worker_tag import worker_application_name
 
 
 class SingletonMeta(type):
@@ -149,7 +145,15 @@ class ConnectionManager(metaclass=SingletonMeta):
 
                 kwargs: dict[str, Any] = {"row_factory": dict_row}
                 kwargs.update(resolved.connect_kwargs)
-                if "application_name" not in kwargs and not dsn_sets_application_name(connection_string):
+                named_by_host = "application_name" in kwargs or dsn_sets_application_name(connection_string)
+                if resolved.worker_id is not None:
+                    if named_by_host:
+                        raise ValueError(
+                            "worker_id needs the engine's own application_name to tell its sessions apart; "
+                            "remove application_name from connect_kwargs and from the connection string"
+                        )
+                    kwargs["application_name"] = worker_application_name(resolved.worker_id)
+                elif not named_by_host:
                     kwargs["application_name"] = engine_application_name()
                 pool_kwargs: dict[str, Any] = {
                     "min_size": resolved.min_size,
@@ -158,17 +162,13 @@ class ConnectionManager(metaclass=SingletonMeta):
                     "kwargs": kwargs,
                     "connection_class": engine_connection_class(),
                 }
-                options = merged_options(resolved, kwargs, connection_string)
-                if options is not None:
-                    kwargs["options"] = options
-                findings: list[str] = []
-                configure = checking_configure(
-                    expected_timeouts(resolved, options), resolved.configure, findings
-                )
+                libpq_options = merged_options(resolved, kwargs, connection_string)
+                if libpq_options is not None:
+                    kwargs["options"] = libpq_options
                 if resolved.acquire_timeout is not None:
                     pool_kwargs["timeout"] = resolved.acquire_timeout
-                if configure is not None:
-                    pool_kwargs["configure"] = configure
+                if resolved.configure is not None:
+                    pool_kwargs["configure"] = resolved.configure
                 if resolved.check is not None:
                     pool_kwargs["check"] = resolved.check
                 if resolved.reset is not None:
@@ -184,7 +184,7 @@ class ConnectionManager(metaclass=SingletonMeta):
                     "ConnectionPool[Connection[DictRow]]",
                     pool_class(connection_string, **pool_kwargs),
                 )
-                setattr(pool, FINDINGS_ATTRIBUTE, findings)
+                setattr(pool, EXPECTED_ATTRIBUTE, expected_timeouts(resolved, libpq_options))
                 self._postgres_pools[key] = pool
                 self._postgres_keys_by_dsn.setdefault(connection_string, []).append(key)
 

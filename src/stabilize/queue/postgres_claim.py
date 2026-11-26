@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 CLAIM_SQL = (
     "UPDATE {table} "
-    "SET locked_until = NOW() + %(lock_seconds)s * INTERVAL '1 second', attempts = attempts + 1 "
+    "SET locked_until = NOW() + %(lock_seconds)s * INTERVAL '1 second', attempts = attempts + 1{held_by} "
     "WHERE id = ANY(ARRAY("
     "SELECT id FROM {table} "
     "WHERE deliver_at <= NOW() AND stabilize_tenant = %(tenant)s "
@@ -34,20 +34,33 @@ CLAIM_SQL = (
 )
 
 CLAIMED_PUSH_SQL = (
-    "INSERT INTO {table} (message_id, message_type, payload, deliver_at, attempts, locked_until, stabilize_tenant) "
+    "INSERT INTO {table} "
+    "(message_id, message_type, payload, deliver_at, attempts, locked_until, stabilize_tenant{holder_column}) "
     "VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, NOW(), 1, "
-    "NOW() + %(lock_seconds)s * INTERVAL '1 second', %(tenant)s) RETURNING id"
+    "NOW() + %(lock_seconds)s * INTERVAL '1 second', %(tenant)s{holder_value}) RETURNING id"
 )
 
 RELEASE_SQL = (
-    "UPDATE {table} SET locked_until = NULL, attempts = GREATEST(attempts - 1, 0) "
+    "UPDATE {table} SET locked_until = NULL, attempts = GREATEST(attempts - 1, 0){unheld} "
     "WHERE id = %(id)s AND (%(attempts)s::int IS NULL OR attempts = %(attempts)s::int) "
     "AND stabilize_tenant = %(tenant)s"
 )
 
 
+RECLAIM_SQL = (
+    "UPDATE {table} SET locked_until = NULL, locked_by = NULL "
+    "WHERE locked_by = %(worker)s AND stabilize_tenant = %(tenant)s AND locked_until > NOW()"
+)
+
+HAS_LOCKED_BY_SQL = (
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = COALESCE(%(schema)s, current_schema()) "
+    "AND table_name = %(table)s AND column_name = 'locked_by'"
+)
+
+
 class PostgresClaimMixin:
     counts_deliveries = True
+    worker_id: str | None = None
 
     table_name: str
     tenant: str
@@ -69,6 +82,8 @@ class PostgresClaimMixin:
 
         def _serialize_message(self, message: Message) -> str: ...
 
+        def notify_in(self, conn: Any, payload: str = "") -> None: ...
+
     def wake_key(self) -> Hashable | None:
         return ("postgres", self.connection_string, self.schema or "", self.table_name, self.tenant)
 
@@ -84,13 +99,16 @@ class PostgresClaimMixin:
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    CLAIM_SQL.format(table=self.table_name),
+                    CLAIM_SQL.format(
+                        table=self.table_name, held_by=", locked_by = %(worker)s" if self.worker_id else ""
+                    ),
                     {
                         "lock_seconds": self.lock_duration.total_seconds(),
                         "max_attempts": self.max_attempts,
                         "budget": self.store_retry_budget.total_seconds(),
                         "tenant": self.tenant,
                         "limit": int(limit),
+                        "worker": self.worker_id,
                     },
                 )
                 rows = cur.fetchall()
@@ -129,13 +147,18 @@ class PostgresClaimMixin:
             return None
         with connection.cursor() as cur:
             cur.execute(
-                CLAIMED_PUSH_SQL.format(table=self.table_name),
+                CLAIMED_PUSH_SQL.format(
+                    table=self.table_name,
+                    holder_column=", locked_by" if self.worker_id else "",
+                    holder_value=", %(worker)s" if self.worker_id else "",
+                ),
                 {
                     "message_id": str(uuid.uuid4()),
                     "type": message_type,
                     "payload": payload,
                     "lock_seconds": self.lock_duration.total_seconds(),
                     "tenant": self.tenant,
+                    "worker": self.worker_id,
                 },
             )
             row = cur.fetchone()
@@ -155,15 +178,38 @@ class PostgresClaimMixin:
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    RELEASE_SQL.format(table=self.table_name),
+                    RELEASE_SQL.format(table=self.table_name, unheld=", locked_by = NULL" if self.worker_id else ""),
                     {"id": msg_id, "attempts": getattr(message, "attempts", None), "tenant": self.tenant},
                 )
                 released = bool(cur.rowcount == 1)
+            if released:
+                self.notify_in(conn)
             conn.commit()
         self._pending.pop(msg_id, None)
         if released:
             self.announce_ready()
         return released
+
+    def require_locked_by(self) -> None:
+        """Raise EngineSchemaError unless the queue table has the column a worker id is recorded in."""
+        from stabilize.persistence.tenancy import EngineSchemaError
+
+        with self._borrow() as conn:
+            with conn.cursor() as cur:
+                cur.execute(HAS_LOCKED_BY_SQL, {"schema": self.schema, "table": self.table_name})
+                found = cur.fetchone() is not None
+            conn.commit()
+        if not found:
+            raise EngineSchemaError(
+                f"{self.table_name} lacks column locked_by, which a worker_id needs; run stabilize mg-up, or for a "
+                f"queue table of your own: ALTER TABLE {self.table_name} ADD COLUMN locked_by TEXT"
+            )
+
+    def release_held_by_worker(self, conn: Any) -> int:
+        """Clear, on *conn*, every live lease this tenant's messages hold under this queue's worker id."""
+        with conn.cursor() as cur:
+            cur.execute(RECLAIM_SQL.format(table=self.table_name), {"worker": self.worker_id, "tenant": self.tenant})
+            return int(cur.rowcount or 0)
 
     def settle(self, message: Message) -> None:
         """Forget a claimed message whose row a committed transaction already removed."""

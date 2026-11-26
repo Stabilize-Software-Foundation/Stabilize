@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.committed_marks import allow_continuation, take_claimed
 from stabilize.queue.messages import get_message_type_name
-from stabilize.queue.processor.poll_loop import release
+from stabilize.queue.processor.poll_loop import offers, release
 
 if TYPE_CHECKING:
     from stabilize.queue.messages import Message
@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 def run_chain(processor: Any, message: Message) -> None:
     """Handle *message*, then each successor its delivery claimed, up to config.continuation_hops in a row."""
     hops = max(0, int(getattr(processor.config, "continuation_hops", 0) or 0))
-    key = getattr(processor.queue, "wake_key", None)
-    queue_key = key() if callable(key) else None
+    queue_key = processor.queue.wake_key() if offers(processor.queue, "push_claimed") else None
     current: Message | None = message
     try:
         while current is not None:

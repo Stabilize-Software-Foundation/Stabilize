@@ -19,8 +19,8 @@ from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
+from stabilize.persistence.pool_timeouts import report_unheld
 from stabilize.persistence.schema_check import check_postgres_tables
-from stabilize.persistence.pool_timeouts import report_findings
 from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.tenancy import (
     EngineSchemaError,
@@ -34,6 +34,7 @@ from stabilize.queue.message_ids import own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.postgres_claim import PostgresClaimMixin
 from stabilize.queue.postgres_lookups import DELIVERABLE, PostgresQueueLookupsMixin
+from stabilize.queue.postgres_wake import PostgresWakeMixin
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -47,7 +48,7 @@ _TENANT = " AND stabilize_tenant = %(tenant)s"
 _DELIVERABLE = DELIVERABLE
 
 
-class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
+class PostgresQueue(PostgresClaimMixin, PostgresWakeMixin, PostgresQueueLookupsMixin, Queue):
     """PostgreSQL-backed queue implementation.
 
     Uses FOR UPDATE SKIP LOCKED for concurrent message processing across
@@ -67,6 +68,7 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
         options: PoolOptions | None = None,
         tenant: str = "",
         store_retry_budget: timedelta = timedelta(minutes=30),
+        wake_notify: bool = False,
     ) -> None:
         """Initialize the PostgreSQL queue.
 
@@ -90,6 +92,10 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
             tenant: The tenant this queue serves; '' in single-tenant mode.
             store_retry_budget: How long a message is redelivered while the store is
                 unavailable before it is dead-lettered.
+            wake_notify: Issue a NOTIFY with each push that leaves a message for a poll,
+                so a processor in another process that set idle_poll_ms hears it. Every
+                queue object that pushes to the table needs it for that processor to
+                keep its stretched idle poll.
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -101,11 +107,14 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
         self.store_retry_budget = store_retry_budget
+        self.wake_notify = bool(wake_notify)
+        self._wake_channel_name: str | None = None
         self.schema = schema
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
         self._tenant_setting = self._pool_options.tenant_setting if self._pool_options is not None else None
+        self.worker_id = self._pool_options.worker_id if self._pool_options is not None else None
         self._mode = ModeReader(postgres_mode)
         self._schema_state: BaseException | bool = False
         self._engine = EngineBorrower(self._borrow, self.tenant)
@@ -131,7 +140,6 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
             return
         if self._schema_state is not False:
             raise self._schema_state
-        report_findings(self._pool)
         try:
             check_postgres_tables(
                 conn, self.schema, [self.table_name, f"{self.table_name}_dlq"], lambda: self._mode.last or "single"
@@ -139,6 +147,7 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
         except EngineSchemaError as exc:
             self._schema_state = exc
             raise
+        report_unheld(conn, self._pool)
         self._schema_state = True
 
     def close(self) -> None:
@@ -199,6 +208,7 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
             with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
+                self.notify_in(conn)
                 conn.commit()
             record_bare_push(message_type)
             self.announce_ready(delay.total_seconds() if delay else 0.0)
@@ -396,6 +406,7 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
         replayed = _replay_dlq(self._engine, self.table_name, dlq_id)
         if replayed:
             self.announce_ready()
+            self.notify_now()
         return replayed
 
     def dlq_size(self) -> int:

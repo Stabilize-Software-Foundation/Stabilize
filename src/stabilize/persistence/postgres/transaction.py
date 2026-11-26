@@ -89,6 +89,12 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
         self._claimed: Any = None
         self._written_tasks: Captured = []
 
+    def before_commit(self) -> None:
+        """Notify consumers in other processes when this transaction leaves a message for a poll."""
+        notify = getattr(self._queue, "notify_in", None)
+        if self._due_in is not None and callable(notify):
+            notify(self._conn)
+
     def on_commit(self) -> None:
         """Record the message ids this transaction marked processed, once it has committed."""
         from stabilize.persistence.committed_marks import publish_claim, record_acked, record_committed

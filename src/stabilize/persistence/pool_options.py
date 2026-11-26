@@ -28,6 +28,15 @@ class PoolOptions:
     exceeds ``lock_timeout`` fails with SQLSTATE 55P03 and its message is
     redelivered.
 
+    ``worker_id`` names this process among the consumers of a queue, and at most
+    one live process may use a given id for a queue table and tenant (a
+    supervisor's program slot, a systemd unit). The pool's sessions then carry
+    the id and this process's incarnation in ``application_name``, the queue
+    records the id on each message it leases, and a processor that starts
+    releases the leases its predecessor held once no session of another
+    incarnation remains. It needs the ``locked_by`` column on the queue table
+    and the engine's own ``application_name``.
+
     ``acquire_timeout`` bounds how long a borrow waits for a free connection.
     psycopg_pool's own default is 30s, which is the latency an unreachable
     database imposes on every borrow, including a health check.
@@ -70,12 +79,15 @@ class PoolOptions:
     lock_timeout: float | None = 30.0
     statement_timeout: float | None = None
     idle_in_transaction_session_timeout: float | None = None
+    worker_id: str | None = None
 
     def __post_init__(self) -> None:
         from stabilize.persistence.pool_timeouts import TIMEOUT_SETTINGS, validate_timeout
+        from stabilize.persistence.worker_tag import validate_worker_id
 
         for name in TIMEOUT_SETTINGS:
             validate_timeout(name, getattr(self, name))
+        validate_worker_id(self.worker_id)
         if self.max_idle is not None and (
             isinstance(self.max_idle, bool) or not isinstance(self.max_idle, (int, float)) or not self.max_idle > 0
         ):
@@ -104,6 +116,7 @@ class PoolOptions:
             self.lock_timeout,
             self.statement_timeout,
             self.idle_in_transaction_session_timeout,
+            self.worker_id,
         )
 
 

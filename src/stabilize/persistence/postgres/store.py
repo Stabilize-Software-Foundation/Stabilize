@@ -19,6 +19,7 @@ from stabilize.persistence.pool_options import (
     PoolOptions,
     with_schema,
 )
+from stabilize.persistence.pool_timeouts import report_unheld
 from stabilize.persistence.postgres.converters import (
     row_to_execution,
     row_to_stage,
@@ -39,6 +40,7 @@ from stabilize.persistence.postgres.signals import PostgresSignalMixin
 from stabilize.persistence.postgres.stage_query import PostgresStageQueryMixin
 from stabilize.persistence.postgres.workflow_ops import PostgresWorkflowOpsMixin
 from stabilize.persistence.schema_check import check_postgres_tables
+from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.store import (
     StoreTransaction,
     WorkflowNotFoundError,
@@ -46,8 +48,6 @@ from stabilize.persistence.store import (
 )
 from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
-from stabilize.persistence.pool_timeouts import report_findings
-from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.tenancy import (
     EngineSchemaError,
     ModeReader,
@@ -137,12 +137,12 @@ class PostgresWorkflowStore(
             return
         if self._schema_state is not False:
             raise self._schema_state
-        report_findings(self._pool)
         try:
             check_postgres_tables(conn, self.schema, STORE_TABLES, lambda: self._mode.last or "single")
         except EngineSchemaError as exc:
             self._schema_state = exc
             raise
+        report_unheld(conn, self._pool)
         self._schema_state = True
 
     def close(self) -> None:
@@ -390,6 +390,7 @@ class PostgresWorkflowStore(
             begin_store_transaction(conn, getattr(self, "connection_string", None))
             try:
                 yield txn
+                txn.before_commit()
                 conn.commit()
                 txn.on_commit()
             except Exception:

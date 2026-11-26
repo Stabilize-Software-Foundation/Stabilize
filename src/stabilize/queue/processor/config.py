@@ -91,6 +91,14 @@ class QueueProcessorConfig:
     # How many successors in a row a worker handles itself after the message it was given. A delivery that
     # commits one undelayed successor inserts it already leased to this worker. 0 sends every message to a poll.
     continuation_hops: int = 16
+    # When set, a processor whose queue has a wake channel across processes (PostgresQueue(wake_notify=True))
+    # waits this long after a poll that found the queue drained, and no longer poll_frequency_ms. The stretch
+    # holds only while a notification the processor sends itself keeps arriving on its listener.
+    idle_poll_ms: int | None = None
+    # Seconds between the notifications the processor sends itself to prove the channel.
+    wake_ping_seconds: float = 10.0
+    # Seconds the processor polls every poll_frequency_ms after it found a message nobody announced.
+    wake_guard_hold_seconds: float = 300.0
 
     @classmethod
     def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:

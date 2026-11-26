@@ -115,6 +115,14 @@ class Queue(ABC):
 
         wake.announce(self.wake_key(), due_in)
 
+    def next_due_in(self) -> float | None:
+        """Seconds until a message can next be delivered, by delay or by an expiring lease; None when unknown."""
+        return None
+
+    def wake_listener(self, on_wake: Callable[[], None], ping_seconds: float) -> Any:
+        """A listener that calls *on_wake* when another process pushes, or None when this queue has no such channel."""
+        return None
+
     def live_delivery_keys(self, keys: list[str]) -> set[str]:
         """The keys among keys whose message is still in this queue; every key when the queue cannot tell."""
         return set(keys)

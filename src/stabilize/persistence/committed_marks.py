@@ -131,8 +131,9 @@ def may_claim(queue: Any) -> bool:
     state = _state()
     if not state.active or state.exempt or state.hops <= 0 or state.claim_held or state.claimed is not None:
         return False
-    key = getattr(queue, "wake_key", None)
-    return callable(key) and key() == state.hop_queue
+    if not callable(getattr(type(queue), "wake_key", None)):
+        return False
+    return bool(queue.wake_key() == state.hop_queue)
 
 
 def hold_claim() -> None:
