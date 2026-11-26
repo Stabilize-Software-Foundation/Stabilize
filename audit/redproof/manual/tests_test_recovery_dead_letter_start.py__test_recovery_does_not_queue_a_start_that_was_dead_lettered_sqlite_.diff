@@ -1,0 +1,12 @@
+test-id: tests/test_recovery_dead_letter_start.py::test_recovery_does_not_queue_a_start_that_was_dead_lettered[sqlite]
+--- a/src/stabilize/recovery.py
++++ b/src/stabilize/recovery.py
+@@ -355,7 +355,7 @@
+ 
+         if self.queue.has_pending_message_for_execution(workflow.id):
+             return RecoveryResult(workflow_id=workflow.id, status="skipped", message="A message is already queued")
+-        if self._dead_letter_moved_at(StartWorkflow(execution_id=workflow.id), workflow.id) is not None:
++        if False:
+             return RecoveryResult(
+                 workflow_id=workflow.id,
+                 status="dead_lettered",

@@ -1,0 +1,17 @@
+test-id: tests/test_continuation.py::test_process_one_handles_exactly_one_message[sqlite]
+--- a/src/stabilize/persistence/committed_marks.py
++++ b/src/stabilize/persistence/committed_marks.py
+@@ -129,11 +129,9 @@
+ def may_claim(queue: Any) -> bool:
+     """Whether a transaction of the delivery being handled may insert a successor already leased to this worker."""
+     state = _state()
+-    if not state.active or state.exempt or state.hops <= 0 or state.claim_held or state.claimed is not None:
++    if not state.active or state.exempt or state.claim_held or state.claimed is not None:
+         return False
+-    if not callable(getattr(type(queue), "wake_key", None)):
+-        return False
+-    return bool(queue.wake_key() == state.hop_queue)
++    return True
+ 
+ 
+ def hold_claim() -> None:

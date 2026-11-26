@@ -1,0 +1,12 @@
+test-id: tests/test_worker_identity.py::test_only_the_leases_of_the_same_worker_id_are_released
+--- a/src/stabilize/queue/postgres_claim.py
++++ b/src/stabilize/queue/postgres_claim.py
+@@ -49,7 +49,7 @@
+ 
+ RECLAIM_SQL = (
+     "UPDATE {table} SET locked_until = NULL, locked_by = NULL "
+-    "WHERE locked_by = %(worker)s AND stabilize_tenant = %(tenant)s AND locked_until > NOW()"
++    "WHERE %(worker)s IS NOT NULL AND stabilize_tenant = %(tenant)s AND locked_until > NOW()"
+ )
+ 
+ HAS_LOCKED_BY_SQL = (

@@ -1,0 +1,12 @@
+test-id: tests/test_processor_wake.py::test_a_poll_that_returns_after_stop_was_requested_hands_its_message_back[sqlite]
+--- a/src/stabilize/queue/processor/poll_loop.py
++++ b/src/stabilize/queue/processor/poll_loop.py
+@@ -130,7 +130,7 @@
+         finally:
+             with self._lock:
+                 self._active_count -= free - len(polled)
+-                if polled and self._stopping:
++                if False:
+                     self._active_count -= len(polled)
+                     hand_back = True
+         if not hand_back:

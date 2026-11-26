@@ -1,0 +1,12 @@
+test-id: tests/test_ack_in_transaction.py::test_a_lease_taken_by_another_delivery_is_left_to_it_and_the_work_happens_once[sqlite]
+--- a/src/stabilize/persistence/sqlite/transaction.py
++++ b/src/stabilize/persistence/sqlite/transaction.py
+@@ -369,7 +369,7 @@
+         if fence is not None:
+             gone = self._conn.execute(
+                 f"DELETE FROM {self._queue_table} "
+-                "WHERE id = :id AND attempts = :attempts AND stabilize_tenant = :tenant",
++                "WHERE id = :id AND :attempts = :attempts AND stabilize_tenant = :tenant",
+                 {"id": fence[0], "attempts": fence[1], "tenant": self._tenant},
+             )
+             self._acked = (message_id, gone.rowcount == 1)

@@ -1,0 +1,12 @@
+test-id: tests/test_processor_wake.py::test_a_committed_push_is_taken_without_waiting_for_the_poll_interval[sqlite]
+--- a/src/stabilize/queue/sqlite/queue.py
++++ b/src/stabilize/queue/sqlite/queue.py
+@@ -165,7 +165,7 @@
+         if not external_connection:
+             conn.commit()
+             record_bare_push(message_type)
+-            self.announce_ready(delay.total_seconds() if delay else 0.0)
++            pass
+ 
+         logger.debug("Pushed %s (id=%s, deliver_at=%s)", message_type, message_id, deliver_at)
+ 

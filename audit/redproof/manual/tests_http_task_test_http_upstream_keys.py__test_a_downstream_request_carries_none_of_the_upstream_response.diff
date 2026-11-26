@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_upstream_keys.py::test_a_downstream_request_carries_none_of_the_upstream_response
+--- a/src/stabilize/tasks/http/request.py
++++ b/src/stabilize/tasks/http/request.py
+@@ -28,7 +28,7 @@
+     if DECLARED_KEYS in context:
+         hydrated = context.get(HYDRATED_KEYS) or ()
+         declared = context.get(DECLARED_KEYS) or ()
+-        if key in hydrated and key not in declared:
++        if key in hydrated and key in declared:
+             return None
+     return context.get(key)
+ 

@@ -1,0 +1,14 @@
+test-id: tests/test_ack_in_transaction.py::test_a_handler_called_with_no_delivery_bound_leaves_the_row_to_the_caller[sqlite]
+--- a/src/stabilize/persistence/committed_marks.py
++++ b/src/stabilize/persistence/committed_marks.py
+@@ -109,8 +109,8 @@
+     from stabilize.queue.message_ids import own_row_ids
+ 
+     state = _state()
+-    if not state.active or state.delivered_id != message_id or state.delivered_attempts is None:
+-        return None
++    if state.delivered_attempts is None:
++        state.delivered_attempts = 1
+     owned = own_row_ids(queue_table, [message_id])
+     if not owned:
+         return None

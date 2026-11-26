@@ -1,0 +1,12 @@
+test-id: tests/test_continuation.py::test_a_successor_claimed_by_a_delivery_that_then_fails_is_handed_back[sqlite]
+--- a/src/stabilize/queue/processor/continuation.py
++++ b/src/stabilize/queue/processor/continuation.py
+@@ -39,7 +39,7 @@
+ 
+ 
+ def _may_continue(processor: Any, clean: bool) -> bool:
+-    return bool(clean) and not processor._stopping and processor._fault is None
++    return not processor._stopping and processor._fault is None
+ 
+ 
+ def hand_back(queue: Any, message: Message) -> None:

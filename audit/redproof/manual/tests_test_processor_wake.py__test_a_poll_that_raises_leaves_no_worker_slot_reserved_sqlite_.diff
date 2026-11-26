@@ -1,0 +1,12 @@
+test-id: tests/test_processor_wake.py::test_a_poll_that_raises_leaves_no_worker_slot_reserved[sqlite]
+--- a/src/stabilize/queue/processor/poll_loop.py
++++ b/src/stabilize/queue/processor/poll_loop.py
+@@ -129,7 +129,7 @@
+             polled = poll_many(self.queue, free)
+         finally:
+             with self._lock:
+-                self._active_count -= free - len(polled)
++                self._active_count -= 0
+                 if polled and self._stopping:
+                     self._active_count -= len(polled)
+                     hand_back = True
