@@ -2,8 +2,9 @@
 
 For each of the 7 lifecycle message types, worker 1 (a subprocess) runs a
 one-stage, one-task workflow and kills itself with SIGKILL in place of the
-first ack of that type, so the handler's transaction is committed and the
-queue row is still there, leased to a dead process. Worker 2 (another
+first ack of that type, so the handler's transaction is committed. Up to 0.34.6
+the queue row is then still there, leased to a dead process. From 0.35.0 the
+transaction removed the row and the kill lands where the processor settles it. Worker 2 (another
 subprocess) then runs the queue until the workflow completes. Every task
 execution appends a line to a file.
 
@@ -81,6 +82,15 @@ def worker(kind: str, url: str, marker: str, wf_id: str, kill_on: str, seconds: 
             ack(message)
 
         queue.ack = ack_or_die
+        settle = getattr(queue, "settle", None)
+        if callable(settle):
+
+            def settle_or_die(message: Any) -> None:
+                if get_message_type_name(message) == kill_on:
+                    os.kill(os.getpid(), signal.SIGKILL)
+                settle(message)
+
+            queue.settle = settle_or_die
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if store.retrieve(wf_id).status.is_complete:

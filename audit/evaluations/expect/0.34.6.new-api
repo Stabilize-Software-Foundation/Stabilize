@@ -1,0 +1,2 @@
+tests/test_wake_channel.py
+tests/test_worker_identity.py
