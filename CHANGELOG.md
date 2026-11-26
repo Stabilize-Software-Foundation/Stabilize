@@ -6,6 +6,29 @@ No schema change is needed to upgrade. `stabilize mg-up` adds one nullable colum
 `queue_messages.locked_by`, which only a pool with a `worker_id` uses. A 0.34.6 process and a 0.35.0
 process can share a queue. See `docs/guide/processor.rst` for the settings named below.
 
+### Measured
+
+Published 0.34.6 against this release on one CI machine, PostgreSQL 18 in tenancy mode, three runs of
+`audit/evaluations/bench_processor.py`. A range is the spread across the runs.
+
+| | 0.34.6 | 0.35.0 |
+|---|---|---|
+| 5 workflows a second for 30 s, 4 workers, 250 ms poll: p95 from start to task | 31.6 to 35.9 s | 0.09 to 0.18 s |
+| One workflow on an idle processor, 100 ms poll: median from start to finish | 0.78 to 0.83 s | 0.17 to 0.34 s |
+| Backlog of 500 workflows, 8 workers, 50 ms poll: completed per second | 4.3 to 6.2 | 4.4 to 7.9 |
+| The same backlog with psycopg's C implementation (one run) | 10.4 | 15.1 |
+| Commits that write, per one-stage workflow | 24 | 11 |
+| Polls that return a message, per one-stage workflow | 7 | 1 |
+| Statements on the synchronous path in tenancy mode: one stage, each further stage | 143, 98 | 115, 78 |
+| `stop()` while PostgreSQL refuses connections: idle, and with a task running | 27.0 s, 61.1 s | 3.2 s, 3.5 s |
+
+One process does not drain a backlog much faster than before. At 8 workers 0.34.6 was already limited by
+the CPU time a message costs. A profile puts most of that in the database driver, at 21 round trips a
+message on the synchronous path, and this release removes about a fifth of them. Two processes on one
+tenant completed 8.2 to 13.5 workflows a second and four completed 11.1 to 24.6, with each task effect
+present once. CI installs psycopg's pure-Python implementation, and the C implementation roughly doubled the
+rate of both releases.
+
 ### Changed
 
 - **The processor takes work when it is ready (#116, reported by Webmail).** The poll loop slept one

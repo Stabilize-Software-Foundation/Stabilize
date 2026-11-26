@@ -181,6 +181,41 @@ remainder and stay out of scope.
   `test_engine_columns.py` (optional columns). `probe_sigkill_before_ack.py` also kills at
   `queue.settle`.
 
+## Verification status (2026-11-26, CI pipelines 6536, 6559 and 6564)
+
+Met, with the measurement:
+
+- E1 to E8, E10, E16, E17, E19: tests green on SQLite and PostgreSQL, Python 3.14 and 3.11; each test is
+  red on published 0.34.6 for its stated reason (38 tests), and each of 32 stored mutants makes its test
+  fail.
+- E9: stop during a refused-connection outage 3.2 s idle and 3.5 s with a task running (0.34.6: 27.0 s
+  and 61.1 s).
+- E11 to E15: tests green on PostgreSQL. Not exercised behind a transaction pooler or across a real
+  standby promotion.
+- E18: the packaged example prints the lines.
+- E20: published 0.34.6 and the checkout on one queue, 200 of 200 workflows, no effect repeated or
+  missing, on SQLite and PostgreSQL.
+- E21: single mode 73 and 57 (test budget); tenancy mode 115 and 78, measured against 143 and 98 on
+  0.34.6 in the same job. The draft's 107 and 79 were derived from a documented 135 that this workload
+  does not reproduce; the reduction is the predicted 28 and 20.
+- E22, first half: p95 start-to-task under 5 workflows a second 0.09 to 0.18 s in three runs, against
+  31.6 to 35.9 s on 0.34.6.
+
+NOT MET:
+
+- E22, second half: 500 preloaded workflows at 8 workers and a 50 ms poll complete at 1.0 to 1.3 times
+  the 0.34.6 rate with psycopg's pure-Python implementation (4.3 to 6.2 against 4.4 to 7.9 a second) and
+  1.45 times with the C implementation (10.4 against 15.1), and not 3 times. The target assumed that
+  0.34.6 was bound by its poll interval at that setting. It was bound by CPU time per message: a profile
+  shows 21 database round trips a message on the synchronous path and the driver at the top of the own
+  time list. This release removes waiting and about a fifth of the round trips. It does not cut the
+  cost of a message by the factor the target needs.
+- The plan's row "one workflow on an idle processor, at most a quarter of 0.34.6" held in two runs
+  (0.22 and 0.23) and not in a third on a busy runner (0.41).
+
+Open decision for the director: release with E22's second half recorded as not met, or hold for work on
+the cost per message (round trips per message: the handler reads, the tenant arm, the driver).
+
 ## Invariants
 
 1. At-least-once delivery, one marking transaction per delivery.

@@ -91,6 +91,24 @@ Things to know before turning it on:
   it listens is what fills it.
 * SQLite has no channel between processes, and ``idle_poll_ms`` is ignored there with a warning.
 
+What one process can hold
+-------------------------
+
+The changes above remove waiting. They do not change much what a message costs to handle. On the
+synchronous path in tenancy mode a message is about 21 database round trips, and a profile shows most of
+a message's CPU time inside the driver. One process is therefore limited by CPU time per message, and
+more worker threads do not raise that limit.
+
+Measured on one CI machine with PostgreSQL 18 in tenancy mode, a backlog of 500 one-stage workflows at 8
+workers completed at 4.4 to 7.9 workflows a second in three runs with psycopg's pure-Python
+implementation, and at 15.1 in one run with its C implementation. 0.34.6 gave 4.3 to 6.2 and 10.4 on the
+same machine. Two processes on one tenant gave 8.2 to 13.5 workflows a second and four gave 11.1 to
+24.6, with the pure-Python implementation, and each task ran once. The low end of each range is a run
+on a busy machine.
+
+For more throughput, install ``stabilize[c]`` and run more processes on the tenant. Below that limit
+one process keeps latency low. At 5 workflows a second the p95 from start to task was 0.09 to 0.18 s.
+
 Stopping
 --------
 
