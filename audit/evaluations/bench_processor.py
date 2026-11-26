@@ -431,11 +431,77 @@ def fleet(dsn: str, processes: int, count: int = 2000) -> dict[str, Any]:
     }
 
 
+def profile(dsn: str, workflows: int = 60, rows: int = 45) -> dict[str, Any]:
+    """Where one thread spends its time handling one-stage workflows on the synchronous path."""
+    import cProfile
+    import io
+    import pstats
+
+    import psycopg
+
+    from stabilize import Orchestrator, QueueProcessor
+
+    store, queue = _parts(dsn)
+    orchestrator = Orchestrator(queue, store=store)
+    for _ in range(workflows):
+        workflow = _workflow()
+        store.store(workflow)
+        orchestrator.start(workflow)
+    processor = QueueProcessor(queue, store=store, task_registry=_registry())
+    profiler = cProfile.Profile()
+    begin = time.monotonic()
+    cpu = time.process_time()
+    profiler.enable()
+    handled = processor.process_all(timeout=600.0)
+    profiler.disable()
+    wall = time.monotonic() - begin
+    cpu = time.process_time() - cpu
+    queue.close()
+    store.close()
+    for order in ("tottime", "cumulative"):
+        text = io.StringIO()
+        pstats.Stats(profiler, stream=text).strip_dirs().sort_stats(order).print_stats(rows)
+        print(f"--- profile by {order} ---")
+        print(text.getvalue())
+    return {
+        "driver": psycopg.pq.__impl__,
+        "messages": handled,
+        "wall_ms_per_message": round(1000 * wall / max(1, handled), 2),
+        "cpu_ms_per_message_under_profile": round(1000 * cpu / max(1, handled), 2),
+    }
+
+
+def unprofiled(dsn: str, workflows: int = 60) -> dict[str, Any]:
+    """Wall and process CPU time per message on the synchronous path, with no profiler attached."""
+    from stabilize import Orchestrator, QueueProcessor
+
+    store, queue = _parts(dsn)
+    orchestrator = Orchestrator(queue, store=store)
+    for _ in range(workflows):
+        workflow = _workflow()
+        store.store(workflow)
+        orchestrator.start(workflow)
+    processor = QueueProcessor(queue, store=store, task_registry=_registry())
+    begin = time.monotonic()
+    cpu = time.process_time()
+    handled = processor.process_all(timeout=600.0)
+    wall = time.monotonic() - begin
+    cpu = time.process_time() - cpu
+    queue.close()
+    store.close()
+    return {
+        "messages": handled,
+        "wall_ms_per_message": round(1000 * wall / max(1, handled), 2),
+        "cpu_ms_per_message": round(1000 * cpu / max(1, handled), 2),
+    }
+
+
 def measure(with_fleet: bool) -> dict[str, Any]:
     import stabilize
 
     result: dict[str, Any] = {"version": stabilize.__version__, "file": stabilize.__file__}
     scenarios: list[tuple[str, Any]] = [
+        ("unprofiled", unprofiled),
         ("synchronous_statements", synchronous_statements),
         ("threaded_counts", threaded_counts),
         ("single", single),
@@ -443,6 +509,7 @@ def measure(with_fleet: bool) -> dict[str, Any]:
         ("paced", paced),
     ]
     if with_fleet:
+        scenarios.append(("profile", profile))
         scenarios.append(("fleet_2", lambda dsn: fleet(dsn, 2)))
         scenarios.append(("fleet_4", lambda dsn: fleet(dsn, 4)))
     for name, scenario in scenarios:
