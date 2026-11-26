@@ -1,0 +1,12 @@
+test-id: tests/test_ack_in_transaction.py::test_a_first_delivery_is_not_looked_up_in_processed_messages[sqlite]
+--- a/src/stabilize/queue/processor/mixins.py
++++ b/src/stabilize/queue/processor/mixins.py
+@@ -168,7 +168,7 @@
+             # therefore opt-in via dedup_trust_negative_cache.
+             trust_negative = getattr(self.config, "dedup_trust_negative_cache", False)
+             counted = getattr(type(self.queue), "counts_deliveries", False) is True
+-            first_delivery = counted and getattr(message, "attempts", None) == 1
++            first_delivery = False
+             durable_check = not first_delivery and (
+                 dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative)
+             )

@@ -1,0 +1,12 @@
+test-id: tests/test_worker_identity.py::test_a_live_session_of_another_incarnation_blocks_the_release
+--- a/src/stabilize/queue/processor/worker_identity.py
++++ b/src/stabilize/queue/processor/worker_identity.py
+@@ -48,7 +48,7 @@
+                     "the check cannot see its own session in pg_stat_activity, so it cannot rule out a live holder",
+                 )
+             others = sum(1 for held_by, incarnation in tags if held_by == worker_id and incarnation != INCARNATION)
+-            if others:
++            if False:
+                 conn.rollback()
+                 return _withheld(worker_id, f"another incarnation of this worker id has {others} session(s)")
+             released = int(queue.release_held_by_worker(conn))

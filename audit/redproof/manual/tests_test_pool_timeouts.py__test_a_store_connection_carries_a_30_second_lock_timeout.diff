@@ -1,0 +1,12 @@
+test-id: tests/test_pool_timeouts.py::test_a_store_connection_carries_a_30_second_lock_timeout
+--- a/src/stabilize/persistence/pool_options.py
++++ b/src/stabilize/persistence/pool_options.py
+@@ -76,7 +76,7 @@
+     reset: Callable[[Any], None] | None = None
+     tenant_setting: str | None = None
+     audit_key: bytes | None = None
+-    lock_timeout: float | None = 30.0
++    lock_timeout: float | None = None
+     statement_timeout: float | None = None
+     idle_in_transaction_session_timeout: float | None = None
+     worker_id: str | None = None

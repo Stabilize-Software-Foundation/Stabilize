@@ -1,0 +1,12 @@
+test-id: tests/test_continuation.py::test_a_delayed_successor_is_never_claimed[sqlite]
+--- a/src/stabilize/persistence/sqlite/transaction.py
++++ b/src/stabilize/persistence/sqlite/transaction.py
+@@ -284,7 +284,7 @@
+         """
+         from stabilize.queue.messages import get_message_type_name
+ 
+-        if delay <= 0 and self._claim(message):
++        if self._claim(message):
+             self._pushed = True
+             return
+         deliver_at = datetime.now(UTC)

@@ -13,6 +13,27 @@ from urllib.request import Request
 
 from stabilize.tasks.http.utils import guess_content_type, substitute_placeholders
 
+HYDRATED_KEYS = "_hydrated_keys"
+DECLARED_VALUES = "_declared_values"
+
+
+def own_value(context: dict[str, Any], key: str) -> Any:
+    """The stage's own value for a request key.
+
+    The planner records the value a stage declared for a key an ancestor also outputs. That value
+    is returned even after a later plan put the ancestor's output in the context. A value that
+    reached the context only from an ancestor is not the stage's request input, and None is
+    returned for it. A context planned before 0.35.0 carries no record, and its value is returned
+    as it stands.
+    """
+    declared = context.get(DECLARED_VALUES)
+    if isinstance(declared, dict):
+        if key in declared:
+            return declared[key]
+        if key in (context.get(HYDRATED_KEYS) or ()):
+            return None
+    return context.get(key)
+
 
 def build_request(
     method: str,
@@ -39,7 +60,7 @@ def build_request(
     body_bytes: bytes | None = None
 
     # Custom headers
-    custom_headers = context.get("headers", {})
+    custom_headers = own_value(context, "headers") or {}
     for key, value in custom_headers.items():
         headers[key] = substitute_placeholders(str(value), context, secrets)
 
@@ -73,9 +94,9 @@ def build_request(
         body_bytes = urlencode(form_data).encode("utf-8")
         headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
 
-    elif context.get("body") is not None:
+    elif own_value(context, "body") is not None:
         # Raw body
-        body = context["body"]
+        body = own_value(context, "body")
         if isinstance(body, str):
             body = substitute_placeholders(body, context, secrets)
             body_bytes = body.encode("utf-8")

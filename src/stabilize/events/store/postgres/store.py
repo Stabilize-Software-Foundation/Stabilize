@@ -34,6 +34,7 @@ from stabilize.events.store.postgres.subscriptions import PostgresSubscriptionsM
 from stabilize.persistence.connection import get_connection_manager, release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
 from stabilize.persistence.schema_check import check_postgres_tables
+from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.tenancy import (
     EngineSchemaError,
     ModeReader,
@@ -146,7 +147,7 @@ class PostgresEventStore(
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, armed for the tenant and admitted against the mode."""
-        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+        with acquire(self._pool) as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             self._check_schema_once(conn)
             yield conn
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 HYDRATION_KEYS = frozenset(
     {
+        "_declared_values",
         "_hydrated_keys",
     }
 )

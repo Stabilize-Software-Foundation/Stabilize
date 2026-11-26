@@ -42,6 +42,7 @@ KNOWN_LEGACY_CHECKSUMS: dict[str, frozenset[str]] = {
     "01M68PK3W1DW3T8GZ3YKE3SVSJ_redelivery_budget.sql": frozenset({"2b37e1d2fc5784adf29403b55db0f77a"}),
     "01M68J0WB7ASSYV0JQYBA2KAQM_signal_delivery.sql": frozenset({"4a3a4fb28c60f1d13661664b72c89651"}),
     "01M68V88TB2FZ4AG6AH1QW3YY4_subscription_cursor.sql": frozenset({"f28611f5adcbeb2e7420e67f9eac6b1b"}),
+    "01M8ARVANWTQYMRV5G7PW93MEG_queue_locked_by.sql": frozenset({"9219ecdf1dc1ef13b659b04a8e14bbec"}),
 }
 
 RETIRED_MIGRATIONS = frozenset(

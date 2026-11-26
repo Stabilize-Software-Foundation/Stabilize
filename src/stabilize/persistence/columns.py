@@ -202,6 +202,17 @@ BACKEND_ONLY: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 
+OPTIONAL_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
+    "postgres": {"queue_messages": ("locked_by",)},
+    "sqlite": {},
+}
+
+
+def optional_columns(table: str, backend: str) -> tuple[str, ...]:
+    """Columns a shipped migration adds that the engine reads and writes only when a feature asks for them."""
+    return OPTIONAL_COLUMNS[backend].get(table, ())
+
+
 def columns(table: str, backend: str) -> tuple[str, ...]:
     """Every column of *table* on *backend*, the shared list first and the backend's own columns after it."""
     extra = BACKEND_ONLY[backend].get(table, ())

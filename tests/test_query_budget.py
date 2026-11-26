@@ -19,8 +19,8 @@ from stabilize.models.workflow import Workflow
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
-ONE_STAGE_BUDGET = 87
-PER_EXTRA_STAGE_BUDGET = 67
+ONE_STAGE_BUDGET = 73
+PER_EXTRA_STAGE_BUDGET = 57
 
 
 class _NoOp(Task):
@@ -91,10 +91,16 @@ def test_the_counter_sees_a_deliberate_statement(postgres_url: str, monkeypatch:
 
 
 def test_one_stage_stays_within_budget(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _statements_for(postgres_url, 1, monkeypatch) <= ONE_STAGE_BUDGET
+    issued = _statements_for(postgres_url, 1, monkeypatch)
+    assert issued <= ONE_STAGE_BUDGET, (
+        f"one no-op stage issued {issued} statements, over the budget of {ONE_STAGE_BUDGET}"
+    )
 
 
 def test_each_extra_stage_stays_within_budget(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     two = _statements_for(postgres_url, 2, monkeypatch)
     four = _statements_for(postgres_url, 4, monkeypatch)
-    assert (four - two) / 2 <= PER_EXTRA_STAGE_BUDGET
+    extra = (four - two) / 2
+    assert extra <= PER_EXTRA_STAGE_BUDGET, (
+        f"each extra stage issued {extra} statements, over the budget of {PER_EXTRA_STAGE_BUDGET}"
+    )

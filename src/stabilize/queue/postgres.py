@@ -19,7 +19,9 @@ from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
+from stabilize.persistence.pool_timeouts import report_unheld
 from stabilize.persistence.schema_check import check_postgres_tables
+from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.tenancy import (
     EngineSchemaError,
     ModeReader,
@@ -27,11 +29,12 @@ from stabilize.persistence.tenancy import (
     postgres_mode,
     validate_tenant,
 )
-from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
-from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
+from stabilize.queue.message_ids import own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
+from stabilize.queue.postgres_claim import PostgresClaimMixin
 from stabilize.queue.postgres_lookups import DELIVERABLE, PostgresQueueLookupsMixin
+from stabilize.queue.postgres_wake import PostgresWakeMixin
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -45,7 +48,7 @@ _TENANT = " AND stabilize_tenant = %(tenant)s"
 _DELIVERABLE = DELIVERABLE
 
 
-class PostgresQueue(PostgresQueueLookupsMixin, Queue):
+class PostgresQueue(PostgresClaimMixin, PostgresWakeMixin, PostgresQueueLookupsMixin, Queue):
     """PostgreSQL-backed queue implementation.
 
     Uses FOR UPDATE SKIP LOCKED for concurrent message processing across
@@ -65,6 +68,7 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         options: PoolOptions | None = None,
         tenant: str = "",
         store_retry_budget: timedelta = timedelta(minutes=30),
+        wake_notify: bool = False,
     ) -> None:
         """Initialize the PostgreSQL queue.
 
@@ -88,6 +92,10 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             tenant: The tenant this queue serves; '' in single-tenant mode.
             store_retry_budget: How long a message is redelivered while the store is
                 unavailable before it is dead-lettered.
+            wake_notify: Issue a NOTIFY with each push that leaves a message for a poll,
+                so a processor in another process that set idle_poll_ms hears it. Every
+                queue object that pushes to the table needs it for that processor to
+                keep its stretched idle poll.
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -99,11 +107,14 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
         self.store_retry_budget = store_retry_budget
+        self.wake_notify = bool(wake_notify)
+        self._wake_channel_name: str | None = None
         self.schema = schema
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
         self._tenant_setting = self._pool_options.tenant_setting if self._pool_options is not None else None
+        self.worker_id = self._pool_options.worker_id if self._pool_options is not None else None
         self._mode = ModeReader(postgres_mode)
         self._schema_state: BaseException | bool = False
         self._engine = EngineBorrower(self._borrow, self.tenant)
@@ -120,7 +131,7 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
-        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+        with acquire(self._pool) as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             self._check_schema_once(conn)
             yield conn
 
@@ -133,9 +144,12 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             check_postgres_tables(
                 conn, self.schema, [self.table_name, f"{self.table_name}_dlq"], lambda: self._mode.last or "single"
             )
+            if self.worker_id:
+                self.require_locked_by(conn)
         except EngineSchemaError as exc:
             self._schema_state = exc
             raise
+        report_unheld(conn, self._pool)
         self._schema_state = True
 
     def close(self) -> None:
@@ -196,8 +210,10 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
+                self.notify_in(conn)
                 conn.commit()
             record_bare_push(message_type)
+            self.announce_ready(delay.total_seconds() if delay else 0.0)
 
         # Invalidate size cache
         self._size_cache = None
@@ -208,58 +224,6 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         if message:
             callback(message)
             self.ack(message)
-
-    def poll_one(self) -> Message | None:
-        """Poll for a single message without callback."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    UPDATE {self.table_name}
-                    SET locked_until = NOW() + %(lock_seconds)s * INTERVAL '1 second',
-                        attempts = attempts + 1
-                    WHERE id = (
-                        SELECT id FROM {self.table_name}
-                        WHERE deliver_at <= NOW()
-                        AND stabilize_tenant = %(tenant)s
-                        AND (locked_until IS NULL OR locked_until < NOW())
-                        AND {_DELIVERABLE}
-                        ORDER BY deliver_at
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
-                    )
-                    RETURNING id, message_type, payload::text AS payload, attempts, store_retries
-                    """,
-                    {
-                        "lock_seconds": self.lock_duration.total_seconds(),
-                        "max_attempts": self.max_attempts,
-                        "budget": self.store_retry_budget.total_seconds(),
-                        "tenant": self.tenant,
-                    },
-                )
-                row = cur.fetchone()
-            conn.commit()
-
-        if not row:
-            return None
-
-        msg_id = row["id"]
-        msg_type = row["message_type"]
-        try:
-            message = decode_message(msg_type, row["payload"])
-        except MessageDecodeError as exc:
-            logger.error("Moving undecodable message %s to the DLQ: %s", msg_id, exc)
-            self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
-            return None
-
-        message.message_id = delivery_key(self.table_name, msg_id)
-        message.attempts = row["attempts"]
-        message.store_retries = int(row["store_retries"] or 0)
-        self._pending[msg_id] = {
-            "message": message,
-            "type": msg_type,
-        }
-        return message
 
     def ack(self, message: Message) -> None:
         """Acknowledge a message, removing it from the queue."""
@@ -354,6 +318,7 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             conn.commit()
 
         self._pending.pop(msg_id, None)
+        self.announce_ready(max(0.0, delay.total_seconds()))
 
     def live_delivery_keys(self, keys: list[str]) -> set[str]:
         owned = own_row_ids(self.table_name, keys)
@@ -440,7 +405,11 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         """Replay a message from the DLQ back to the main queue."""
         from stabilize.queue.dlq import replay_dlq as _replay_dlq
 
-        return _replay_dlq(self._engine, self.table_name, dlq_id)
+        replayed = _replay_dlq(self._engine, self.table_name, dlq_id)
+        if replayed:
+            self.announce_ready()
+            self.notify_now()
+        return replayed
 
     def dlq_size(self) -> int:
         """Get the number of messages in the Dead Letter Queue."""

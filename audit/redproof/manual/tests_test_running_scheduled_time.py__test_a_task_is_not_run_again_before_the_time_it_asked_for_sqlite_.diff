@@ -1,0 +1,12 @@
+test-id: tests/test_running_scheduled_time.py::test_a_task_is_not_run_again_before_the_time_it_asked_for[sqlite]
+--- a/src/stabilize/handlers/run_task/result.py
++++ b/src/stabilize/handlers/run_task/result.py
+@@ -101,7 +101,7 @@
+     delay = get_backoff_fn(stage, task_model, message, 1)
+     if isinstance(stage.scheduled_time, int) and not isinstance(stage.scheduled_time, bool):
+         until_scheduled = timedelta(milliseconds=stage.scheduled_time - int(time.time() * 1000))
+-        delay = max(delay, until_scheduled)
++        delay = min(delay, until_scheduled)
+ 
+     txn_helper.execute_atomic(
+         stage=stage,

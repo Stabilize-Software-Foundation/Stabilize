@@ -1,0 +1,12 @@
+test-id: tests/test_processor_wake.py::test_a_full_pool_takes_the_next_message_when_a_worker_frees[sqlite]
+--- a/src/stabilize/queue/processor/poll_loop.py
++++ b/src/stabilize/queue/processor/poll_loop.py
+@@ -147,7 +147,7 @@
+             self._active_count -= 1
+             waiting = self._saturated
+             self._saturated = False
+-        if waiting:
++        if False:
+             self._wake.signal()
+ 
+     def _poll_loop(self) -> None:

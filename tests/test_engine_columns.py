@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from stabilize.persistence.columns import ENGINE_COLUMNS, columns, select_list
+from stabilize.persistence.columns import ENGINE_COLUMNS, columns, optional_columns, select_list
 from tests.mg_support import output, scratch_database, stabilize
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "stabilize"
@@ -87,13 +87,16 @@ def test_postgres_catalog_equals_the_column_lists(db: str) -> None:
             "FROM information_schema.columns WHERE table_schema = 'public' GROUP BY table_name"
         ).fetchall()
     catalog = {str(table): set(cols) for table, cols in rows}
+    listed = {
+        table: set(columns(table, "postgres")) | set(optional_columns(table, "postgres")) for table in ENGINE_COLUMNS
+    }
     mismatches = {
         table: (
-            sorted(set(columns(table, "postgres")) - catalog.get(table, set())),
-            sorted(catalog.get(table, set()) - set(columns(table, "postgres"))),
+            sorted(listed[table] - catalog.get(table, set())),
+            sorted(catalog.get(table, set()) - listed[table]),
         )
         for table in ENGINE_COLUMNS
-        if set(columns(table, "postgres")) != catalog.get(table, set())
+        if listed[table] != catalog.get(table, set())
     }
     assert not mismatches, f"(listed but absent, present but unlisted): {mismatches}"
 

@@ -1,0 +1,12 @@
+test-id: tests/test_wake_channel.py::test_a_publisher_that_does_not_notify_trips_the_guard_and_the_stretch_comes_back[postgres]
+--- a/src/stabilize/queue/processor/idle.py
++++ b/src/stabilize/queue/processor/idle.py
+@@ -85,7 +85,7 @@
+             if getattr(message, "attempts", None) == 1
+         ]
+         worst = max(late, default=0.0)
+-        if worst <= threshold:
++        if worst <= threshold or worst > threshold:
+             return
+         hold = float(self.config.wake_guard_hold_seconds)
+         self._guard_until = time.monotonic() + hold

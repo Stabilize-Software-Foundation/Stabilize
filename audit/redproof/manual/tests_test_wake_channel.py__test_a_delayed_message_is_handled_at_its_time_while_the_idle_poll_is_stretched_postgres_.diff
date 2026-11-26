@@ -1,0 +1,14 @@
+test-id: tests/test_wake_channel.py::test_a_delayed_message_is_handled_at_its_time_while_the_idle_poll_is_stretched[postgres]
+--- a/src/stabilize/queue/processor/idle.py
++++ b/src/stabilize/queue/processor/idle.py
+@@ -69,8 +69,8 @@
+         self._stretched_wait = interval > int(self.config.poll_frequency_ms)
+         if self._stretched_wait:
+             due = self.queue.next_due_in() if offers(self.queue, "next_due_in") else None
+-            if due is not None:
+-                self._wake.on_announce(max(READY_NOW_WAIT_SECONDS, float(due)))
++            if due is None:
++                self._wake.on_announce(READY_NOW_WAIT_SECONDS)
+         return interval / 1000.0
+ 
+     def _judge_poll(self, polled: list[Message]) -> None:

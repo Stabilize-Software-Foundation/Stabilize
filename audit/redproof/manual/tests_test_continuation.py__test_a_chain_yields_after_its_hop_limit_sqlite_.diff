@@ -1,0 +1,12 @@
+test-id: tests/test_continuation.py::test_a_chain_yields_after_its_hop_limit[sqlite]
+--- a/src/stabilize/queue/processor/continuation.py
++++ b/src/stabilize/queue/processor/continuation.py
+@@ -32,7 +32,7 @@
+                 if claimed is not None and not _may_continue(processor, clean):
+                     hand_back(processor.queue, claimed)
+                     claimed = None
+-            hops -= 1
++            hops -= 0
+             current = claimed
+     finally:
+         allow_continuation(0, None)

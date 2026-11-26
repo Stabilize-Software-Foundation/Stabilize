@@ -1,0 +1,12 @@
+test-id: tests/test_continuation.py::test_of_a_fan_out_one_successor_is_continued_and_the_others_are_polled[sqlite]
+--- a/src/stabilize/persistence/committed_marks.py
++++ b/src/stabilize/persistence/committed_marks.py
+@@ -129,7 +129,7 @@
+ def may_claim(queue: Any) -> bool:
+     """Whether a transaction of the delivery being handled may insert a successor already leased to this worker."""
+     state = _state()
+-    if not state.active or state.exempt or state.hops <= 0 or state.claim_held or state.claimed is not None:
++    if not state.active or state.exempt or state.hops <= 0:
+         return False
+     if not callable(getattr(type(queue), "wake_key", None)):
+         return False

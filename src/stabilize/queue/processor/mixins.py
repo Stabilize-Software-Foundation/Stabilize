@@ -14,6 +14,7 @@ from stabilize.persistence.committed_marks import (
     DEFECT_LIMIT,
     DeliveryDefect,
     begin_delivery,
+    consume_acked,
     consume_committed,
     delivery_defects,
     end_delivery,
@@ -166,7 +167,11 @@ class QueueProcessorMixin:
             # re-execute on redelivery. The negative-cache fast path is
             # therefore opt-in via dedup_trust_negative_cache.
             trust_negative = getattr(self.config, "dedup_trust_negative_cache", False)
-            durable_check = dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative)
+            counted = getattr(type(self.queue), "counts_deliveries", False) is True
+            first_delivery = counted and getattr(message, "attempts", None) == 1
+            durable_check = not first_delivery and (
+                dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative)
+            )
             if durable_check and self._store is not None and self._store.is_message_processed(message_id):
                 logger.info(
                     "Skipping duplicate message %s (%s)",
@@ -187,7 +192,7 @@ class QueueProcessorMixin:
 
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
-        begin_delivery()
+        begin_delivery(message)
         try:
             with bind_tenant(getattr(self._store, "tenant", "") or ""):
                 handler.handle(message)
@@ -215,6 +220,14 @@ class QueueProcessorMixin:
                     handler_type=get_message_type_name(message),
                     execution_id=execution_id,
                 )
+
+    def _settle_or_ack(self, message: Message) -> None:
+        message_id = getattr(message, "message_id", None)
+        if message_id and consume_acked(message_id):
+            if callable(getattr(type(self.queue), "settle", None)):
+                self.queue.settle(message)
+            return
+        self.queue.ack(message)
 
     def _check_delivery(self, message: Message, message_id: str | None) -> None:
         reasons = delivery_defects(message_id)

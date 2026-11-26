@@ -1,0 +1,9 @@
+test-id: tests/test_wake_channel.py::test_a_notifying_push_from_outside_the_process_hub_wakes_an_idle_processor[postgres]
+--- a/src/stabilize/queue/postgres_wake.py
++++ b/src/stabilize/queue/postgres_wake.py
+@@ -225,4 +225,4 @@
+                     if payload.startswith(f"{PING_PREFIX}{self._token}:"):
+                         self._proved_at = time.monotonic()
+                 else:
+-                    self._on_wake()
++                    continue

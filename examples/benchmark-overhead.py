@@ -8,7 +8,9 @@ Key: Uses HTTP/1.0 to avoid keepalive connection blocking artifacts.
 """
 
 import json
+import os
 import shutil
+import sqlite3
 import statistics
 import tempfile
 import threading
@@ -166,6 +168,60 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.tasks.http import HTTPTask
 
+import stabilize.persistence.connection as _engine_connection
+
+COMMITS = [0]
+_commit_lock = threading.Lock()
+_engine_factory = _engine_connection.engine_sqlite_connection_class
+
+
+def _counting_connection_class():
+    base = _engine_factory()
+
+    class CountingConnection(base):
+        def commit(self):
+            wrote = self.in_transaction
+            super().commit()
+            if wrote:
+                with _commit_lock:
+                    COMMITS[0] += 1
+
+    return CountingConnection
+
+
+_engine_connection.engine_sqlite_connection_class = _counting_connection_class
+
+
+def measure_commit_ms(directory, journal_mode, synchronous, samples=60):
+    conn = sqlite3.connect(f"{directory}/commit_cost.db")
+    conn.execute(f"PRAGMA journal_mode={journal_mode}")
+    conn.execute(f"PRAGMA synchronous={synchronous}")
+    conn.execute("CREATE TABLE cost (id INTEGER PRIMARY KEY, v TEXT)")
+    conn.commit()
+    taken = []
+    for _ in range(samples):
+        conn.execute("INSERT INTO cost (v) VALUES (?)", ("x" * 200,))
+        started = time.perf_counter()
+        conn.commit()
+        taken.append((time.perf_counter() - started) * 1000)
+    conn.close()
+    return statistics.median(taken)
+
+
+def measure_read_ms(path, samples=60):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        pages = max(1, os.fstat(fd).st_size // 4096)
+        taken = []
+        for index in range(samples):
+            started = time.perf_counter()
+            os.pread(fd, 4096, (index % pages) * 4096)
+            taken.append((time.perf_counter() - started) * 1000)
+    finally:
+        os.close(fd)
+    return statistics.median(taken)
+
+
 work_dir = tempfile.mkdtemp(prefix="stabilize-bench-")
 db_path = f"{work_dir}/stabilize_bench.db"
 events_db_path = f"{work_dir}/stabilize_bench_events.db"
@@ -234,6 +290,7 @@ bus.subscribe("bench_timeline", timeline.apply)
 
 # Execute
 store.store(workflow)
+COMMITS[0] = 0
 t0 = time.perf_counter()
 orchestrator.start(workflow)
 processor.start()
@@ -246,13 +303,24 @@ while time.time() < deadline:
     time.sleep(0.01)
 
 t1 = time.perf_counter()
+phase3_commits = COMMITS[0]
 processor.stop()
 
 stab_wall = (t1 - t0) * 1000
+_storage = store._get_connection()
+journal_mode = str(_storage.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+synchronous_level = int(_storage.execute("PRAGMA synchronous").fetchone()[0])
+synchronous_name = {0: "OFF", 1: "NORMAL", 2: "FULL", 3: "EXTRA"}.get(synchronous_level, str(synchronous_level))
+commit_ms = measure_commit_ms(work_dir, journal_mode, synchronous_level)
+read_ms = measure_read_ms(db_path)
+commit_time_ms = phase3_commits * commit_ms
 wf = store.retrieve(workflow.id)
 assert wf.status == WorkflowStatus.SUCCEEDED, f"Workflow failed: {wf.status}"
 print(f"  Status: {wf.status.name}")
 print(f"  Wall clock: {stab_wall:.0f}ms")
+print(f"  Storage: SQLite journal_mode={journal_mode} synchronous={synchronous_name} in {work_dir}")
+print(f"  One commit (median of 60): {commit_ms:.2f}ms   One read (median of 60): {read_ms:.3f}ms")
+print(f"  Commits that wrote in phase 3: {phase3_commits}   Time in commits: ~{commit_time_ms:.0f}ms")
 
 # ──────────────────────────────────────────────────
 # 5. DB TIMESTAMP ANALYSIS
@@ -397,9 +465,16 @@ print(f"""
   │  HTTP stage window:            {window:>6}ms                      │
   │  Max concurrency:              {max_conc:>6}/{NUM_TASKS}                     │
   │                                                                 │
+  │                        STORAGE                                  │
+  │  Journal / synchronous:        {journal_mode} / {synchronous_name}
+  │  One commit (median of 60):    {commit_ms:>6.2f}ms                      │
+  │  One read (median of 60):      {read_ms:>6.3f}ms                      │
+  │  Commits that wrote:           {phase3_commits:>6}                      │
+  │  Time in commits:              ~{commit_time_ms:>5.0f}ms                      │
+  │                                                                 │
   │                        OVERHEAD                                 │
   │  Wall overhead vs raw:         {overhead_ms:>+6.0f}ms ({overhead_pct:>+.0f}%)             │
-  │  Orchestration overhead:       ~{orchestration_overhead:>5.0f}ms                      │
+  │  Orchestration overhead:       ~{orchestration_overhead:>5.0f}ms (includes the time in commits)
   │  Per-msg processing:           ~{per_msg:>5.1f}ms ({est_messages} msgs)        │
   │                                                                 │
   │                        EVENT SOURCING                           │

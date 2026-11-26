@@ -219,10 +219,13 @@ def test_a_redelivered_message_is_acked_without_pushing_again(any_db: str) -> No
     processor = _processor(store, queue, enable_deduplication=False)
     try:
         queue.push(StartWorkflow(execution_type="PIPELINE", execution_id="01NOSUCHWORKFLOW00000001"))
+        stale = queue.poll_one()
+        assert isinstance(stale, StartWorkflow) and stale.message_id
+        queue.reschedule(stale, timedelta(0))
         first = queue.poll_one()
-        assert isinstance(first, StartWorkflow) and first.message_id
-        processor._handle_message(first)
-        assert queue.size() == 2, "the first delivery pushes InvalidWorkflowId beside the leased message"
+        assert isinstance(first, StartWorkflow) and first.message_id == stale.message_id and first.attempts == 2
+        processor._handle_message(stale)
+        assert queue.size() == 2, "the first delivery pushes InvalidWorkflowId beside the message another holds"
         with pytest.raises(DuplicateDeliveryError):
             processor._handle_message(first)
         assert queue.size() == 2, "the redelivery pushed again"

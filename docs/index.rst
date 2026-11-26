@@ -32,6 +32,7 @@ Key Features
    guide/data_flow
    guide/flow_control
    guide/persistence
+   guide/processor
    guide/resilience
    guide/error_handling
    guide/event_sourcing

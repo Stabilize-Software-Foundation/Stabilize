@@ -24,9 +24,12 @@ from stabilize.queue.messages import Message
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.drain import DrainResult, SynchronousDrainMixin
 from stabilize.queue.processor.handler_base import MessageHandler
+from stabilize.queue.processor.idle import IdlePollMixin
 from stabilize.queue.processor.mixins import QueueProcessorMixin
+from stabilize.queue.processor.poll_loop import PollLoopMixin, WakeState
 from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.queue.processor.submission import MessageSubmissionMixin
+from stabilize.queue.processor.worker_identity import ReclaimResult, reclaim
 from stabilize.recovery import RecoverySummary
 from stabilize.threads import in_context
 
@@ -46,7 +49,9 @@ logger = logging.getLogger(__name__)
 M = TypeVar("M", bound=Message)
 
 
-class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissionMixin):
+class QueueProcessor(
+    QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissionMixin, IdlePollMixin, PollLoopMixin
+):
     """Processes messages from a queue using registered handlers.
 
     The processor polls the queue at regular intervals and dispatches
@@ -124,12 +129,21 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         self._lock = threading.Lock()
         self._processing_lock = threading.Lock()  # Lock for process_all
         self._active_count = 0
+        self._saturated = False
+        self._wake = WakeState()
+        self._stop_event = threading.Event()
+        self._wake_key: Any = None
+        self._listener: Any = None
+        self._guard_until = 0.0
+        self._idle_timed_out = False
+        self._stretched_wait = False
         self._in_flight: set[str] = set()
         self._in_flight_lock = threading.Lock()
         self._last_dlq_check = 0.0
         self.delivery_defects: list[DeliveryDefect] = []
         self.last_drain = DrainResult()
         self.last_recovery = RecoverySummary()
+        self.last_reclaim = ReclaimResult()
 
         # Auto-register default handlers when both store and task_registry are provided
         if store is not None and task_registry is not None:
@@ -228,6 +242,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             raise self._fault
         if self._running:
             return
+        self.last_reclaim = reclaim(self.queue)
+        self._start_listener()
 
         # Opt-in: recover interrupted workflows once before we begin polling, so
         # re-queued work is picked up immediately. Never let recovery failure
@@ -245,14 +261,18 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             )
 
         self._running = True
+        self._stop_event.clear()
+        self._subscribe_wake()
         self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
-        self._poll_thread = threading.Thread(target=in_context(self._poll_loop), daemon=True)
+        self._poll_thread = threading.Thread(target=in_context(self._watching(self._poll_loop)), daemon=True)
         self._poll_thread.start()
 
         # Opt-in: periodic background recovery sweeps for long-running/distributed
         # deployments (catch workflows orphaned by a crashed peer worker).
         if self.config.recovery_interval_seconds and self.config.recovery_interval_seconds > 0:
-            self._recovery_thread = threading.Thread(target=in_context(self._recovery_loop), daemon=True)
+            self._recovery_thread = threading.Thread(
+                target=in_context(self._watching(self._recovery_loop)), daemon=True
+            )
             self._recovery_thread.start()
 
         self._retention_thread = start_retention_thread(self)
@@ -273,6 +293,10 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         """
         self._stopping = True
         self._running = False
+        self._stop_event.set()
+        self._wake.signal()
+        self._unsubscribe_wake()
+        self._stop_listener()
 
         if self._poll_thread:
             self._poll_thread.join(timeout=5.0)
@@ -300,6 +324,22 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             )
         logger.info("Queue processor stopped")
         return remaining
+
+    def _watching(self, target: Callable[..., Any]) -> Callable[..., Any]:
+        from stabilize.persistence.stop_signal import bound_to
+
+        return bound_to(self._stop_event, target)
+
+    def _subscribe_wake(self) -> None:
+        from stabilize.queue import wake
+
+        self._wake_key = self.queue.wake_key() if callable(getattr(type(self.queue), "wake_key", None)) else None
+        wake.subscribe(self._wake_key, self._wake.on_announce)
+
+    def _unsubscribe_wake(self) -> None:
+        from stabilize.queue import wake
+
+        wake.unsubscribe(self._wake_key, self._wake.on_announce)
 
     def request_stop(self) -> None:
         """Request graceful stop without blocking.
@@ -395,62 +435,6 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             logger.debug("metrics sample skipped: the store does not count active workflows")
         except Exception as e:
             logger.warning("metrics sample failed: %s", e)
-
-    def _poll_loop(self) -> None:
-        """Main polling loop.
-
-        Uses a lock to prevent race condition between stopping flag check
-        and message polling. This ensures no messages are submitted after
-        shutdown is requested.
-        """
-        poll_interval = self.config.poll_frequency_ms / 1000.0
-        dlq_interval = getattr(self.config, "dlq_check_interval_seconds", 0.0)
-        last_dlq_check = time.monotonic()
-        sample_interval = getattr(self.config, "metrics_sample_interval_seconds", 0.0)
-        last_sample = time.monotonic()
-
-        while self._running:
-            try:
-                # Periodically move poisoned (attempts-exhausted) messages to
-                # the DLQ. Without this a daemon using start() never sweeps:
-                # poisoned work stalls invisibly and size()-based drain checks
-                # can never reach zero.
-                if dlq_interval > 0 and time.monotonic() - last_dlq_check >= dlq_interval:
-                    last_dlq_check = time.monotonic()
-                    self._check_dlq()
-                if sample_interval > 0 and time.monotonic() - last_sample >= sample_interval:
-                    last_sample = time.monotonic()
-                    self.sample_metrics()
-
-                # Hold lock while checking stopping flag AND polling to prevent race
-                # condition where a message could be submitted after stop is requested
-                message = None
-                with self._lock:
-                    # Check if stopping - don't accept new work
-                    if self._stopping or self._active_count >= self.config.max_workers:
-                        pass  # Will sleep outside lock
-                    else:
-                        # Poll under lock to prevent race
-                        message = self.queue.poll_one()
-                        if message:
-                            # Increment count while still holding lock
-                            self._active_count += 1
-
-                if message:
-                    # Submit outside lock (submit doesn't need lock protection)
-                    self._submit_message_internal(message)
-                else:
-                    time.sleep(poll_interval)
-
-            except TenancyModeChanged as e:
-                self._latch(e)
-                break
-            except Exception:
-                logger.exception("Error in poll loop")
-                if self.config.stop_on_error:
-                    self._running = False
-                    break
-                time.sleep(poll_interval)
 
     @property
     def is_running(self) -> bool:

@@ -5,7 +5,7 @@ Builds tasks and before-stages for a stage that is ready to run.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.graph import StageGraphBuilder
 from stabilize.stages.builder import (
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
 
 HYDRATED_KEYS = "_hydrated_keys"
+DECLARED_VALUES = "_declared_values"
 
 
 class StartStagePlannerMixin:
@@ -46,10 +47,11 @@ class StartStagePlannerMixin:
 
         ancestor_keys = set(ancestor_outputs)
         previously_hydrated = set(stage.context.get(HYDRATED_KEYS) or ())
+        declared: dict[str, Any] = dict(stage.context.get(DECLARED_VALUES) or {})
 
         merged = ancestor_outputs
         for key, value in stage.context.items():
-            if key == HYDRATED_KEYS:
+            if key in (HYDRATED_KEYS, DECLARED_VALUES):
                 continue
             if key in reducers:
                 # A reducer produced the authoritative value for this key;
@@ -60,6 +62,8 @@ class StartStagePlannerMixin:
                 # this stage. On a re-entry (jump, restart, loop-back) the
                 # ancestor is authoritative; the copy is stale.
                 continue
+            if key in ancestor_keys:
+                declared[key] = value
             if key in merged and isinstance(merged[key], list) and isinstance(value, list):
                 # Concatenate lists, avoiding duplicates
                 existing = merged[key]
@@ -71,6 +75,7 @@ class StartStagePlannerMixin:
 
         if ancestor_keys:
             merged[HYDRATED_KEYS] = sorted(ancestor_keys)
+            merged[DECLARED_VALUES] = declared
 
         stage.context = merged
 

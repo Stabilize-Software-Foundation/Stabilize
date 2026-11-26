@@ -19,6 +19,7 @@ from stabilize.persistence.pool_options import (
     PoolOptions,
     with_schema,
 )
+from stabilize.persistence.pool_timeouts import report_unheld
 from stabilize.persistence.postgres.converters import (
     row_to_execution,
     row_to_stage,
@@ -39,6 +40,7 @@ from stabilize.persistence.postgres.signals import PostgresSignalMixin
 from stabilize.persistence.postgres.stage_query import PostgresStageQueryMixin
 from stabilize.persistence.postgres.workflow_ops import PostgresWorkflowOpsMixin
 from stabilize.persistence.schema_check import check_postgres_tables
+from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.store import (
     StoreTransaction,
     WorkflowNotFoundError,
@@ -104,8 +106,8 @@ class PostgresWorkflowStore(
                 ran with MG_SCHEMA does not need the caller to hand-write one
                 into the DSN.
             options: Pool and connection options. With none supplied,
-                connections inherit the server defaults and carry no
-                statement_timeout and no lock_timeout.
+                connections carry a 30 s lock_timeout and no
+                statement_timeout.
             health_timeout: Bound on is_healthy()'s wait for a connection.
             tenant: The tenant this store reads and writes; '' in single-tenant mode.
         """
@@ -126,7 +128,7 @@ class PostgresWorkflowStore(
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
-        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+        with acquire(self._pool) as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             self._check_schema_once(conn)
             yield conn
 
@@ -140,6 +142,7 @@ class PostgresWorkflowStore(
         except EngineSchemaError as exc:
             self._schema_state = exc
             raise
+        report_unheld(conn, self._pool)
         self._schema_state = True
 
     def close(self) -> None:
@@ -387,6 +390,7 @@ class PostgresWorkflowStore(
             begin_store_transaction(conn, getattr(self, "connection_string", None))
             try:
                 yield txn
+                txn.before_commit()
                 conn.commit()
                 txn.on_commit()
             except Exception:

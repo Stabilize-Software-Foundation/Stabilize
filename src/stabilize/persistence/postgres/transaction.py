@@ -27,6 +27,32 @@ logger = logging.getLogger(__name__)
 
 ADMISSION_LOCK_CLASS = 0x5354424C
 
+_MARK_SQL = """
+    INSERT INTO processed_messages (
+        message_id, processed_at, handler_type, execution_id, stabilize_tenant
+    ) VALUES (
+        %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s, %(tenant)s
+    )
+    ON CONFLICT (message_id) DO NOTHING
+"""
+
+_MARK_AND_ACK_SQL = """
+    WITH gone AS (
+        DELETE FROM {table}
+        WHERE id = %(row)s AND attempts = %(attempts)s AND stabilize_tenant = %(tenant)s
+        RETURNING 1
+    ), marked AS (
+        INSERT INTO processed_messages (
+            message_id, processed_at, handler_type, execution_id, stabilize_tenant
+        ) VALUES (
+            %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s, %(tenant)s
+        )
+        ON CONFLICT (message_id) DO NOTHING
+        RETURNING 1
+    )
+    SELECT (SELECT count(*) FROM gone) AS gone, (SELECT count(*) FROM marked) AS marked
+"""
+
 
 class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
     """Atomic transaction spanning store and queue operations for PostgreSQL.
@@ -58,15 +84,33 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._marked_ids: list[str] = []
         self._pushed = False
+        self._due_in: float | None = None
+        self._acked: tuple[str, bool] | None = None
+        self._claimed: Any = None
         self._written_tasks: Captured = []
+
+    def before_commit(self) -> None:
+        """Notify consumers in other processes when this transaction leaves a message for a poll."""
+        notify = getattr(self._queue, "notify_in", None)
+        if self._due_in is not None and callable(notify):
+            notify(self._conn)
 
     def on_commit(self) -> None:
         """Record the message ids this transaction marked processed, once it has committed."""
-        from stabilize.persistence.committed_marks import record_committed
+        from stabilize.persistence.committed_marks import publish_claim, record_acked, record_committed
 
         record_committed(self._marked_ids, pushed=self._pushed)
+        if self._claimed is not None:
+            publish_claim(self._claimed)
+        if self._acked is not None:
+            record_acked(self._acked[0])
+            if not self._acked[1]:
+                logger.warning("ack(%s): the lease was taken by another worker; not deleted", self._acked[0])
         commit_captured(self._written_tasks)
         self._written_tasks = []
+        announce = getattr(self._queue, "announce_ready", None)
+        if self._due_in is not None and callable(announce):
+            announce(self._due_in)
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.
@@ -78,6 +122,11 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
             obj.version = original_version
         self._staged_objects.clear()
         self._written_tasks = []
+        if self._claimed is not None:
+            from stabilize.persistence.committed_marks import drop_claim
+
+            self._claimed = None
+            drop_claim()
 
     def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
         """Store or update a stage within the transaction.
@@ -149,7 +198,24 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
         from datetime import timedelta
 
         self._pushed = True
+        if not delay and self._claim(message):
+            return
         self._queue.push(message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn)
+        due_in = max(0.0, float(delay or 0))
+        self._due_in = due_in if self._due_in is None else min(self._due_in, due_in)
+
+    def _claim(self, message: Message) -> bool:
+        from stabilize.persistence.committed_marks import hold_claim, may_claim
+
+        push_claimed = getattr(self._queue, "push_claimed", None)
+        if not callable(push_claimed) or not may_claim(self._queue):
+            return False
+        claimed = push_claimed(message, self._conn)
+        if claimed is None:
+            return False
+        self._claimed = claimed
+        hold_claim()
+        return True
 
     def mark_message_processed(
         self,
@@ -157,25 +223,31 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
         handler_type: str | None = None,
         execution_id: str | None = None,
     ) -> bool:
-        """Mark a message as successfully processed within the transaction."""
+        """Mark a message processed; the delivery being handled also loses its queue row, fenced on its attempt."""
+        from stabilize.persistence.committed_marks import delivery_fence
+
+        params = {
+            "message_id": message_id,
+            "handler_type": handler_type,
+            "execution_id": execution_id,
+            "tenant": self._tenant,
+        }
+        fence = None
+        if getattr(type(self._queue), "counts_deliveries", False) is True:
+            fence = delivery_fence(message_id, self._queue_table())
         with self._conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO processed_messages (
-                    message_id, processed_at, handler_type, execution_id, stabilize_tenant
-                ) VALUES (
-                    %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s, %(tenant)s
+            if fence is None:
+                cur.execute(_MARK_SQL, params)
+                inserted = bool(cur.rowcount == 1)
+            else:
+                cur.execute(
+                    _MARK_AND_ACK_SQL.format(table=self._queue_table()),
+                    {**params, "row": fence[0], "attempts": fence[1]},
                 )
-                ON CONFLICT (message_id) DO NOTHING
-                """,
-                {
-                    "message_id": message_id,
-                    "handler_type": handler_type,
-                    "execution_id": execution_id,
-                    "tenant": self._tenant,
-                },
-            )
-            inserted = bool(cur.rowcount == 1)
+                counts = cur.fetchone()
+                inserted = bool(counts and int(counts["marked"]) == 1)
+                if inserted:
+                    self._acked = (message_id, bool(int(counts["gone"]) == 1))
             if not inserted:
                 cur.execute(
                     "SELECT stabilize_tenant AS owner FROM processed_messages WHERE message_id = %(message_id)s",

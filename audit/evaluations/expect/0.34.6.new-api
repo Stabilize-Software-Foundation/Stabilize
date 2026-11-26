@@ -1,0 +1,7 @@
+tests/test_wake_channel.py
+tests/test_worker_identity.py
+tests/test_engine_columns.py
+tests/test_mg_up_adoption.py
+tests/test_mg_up_handoff.py
+tests/test_mg_up_history_schema.py
+tests/test_mg_up_takeover.py

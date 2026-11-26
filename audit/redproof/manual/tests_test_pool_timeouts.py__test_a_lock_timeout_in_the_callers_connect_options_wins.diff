@@ -1,0 +1,12 @@
+test-id: tests/test_pool_timeouts.py::test_a_lock_timeout_in_the_callers_connect_options_wins
+--- a/src/stabilize/persistence/pool_timeouts.py
++++ b/src/stabilize/persistence/pool_timeouts.py
+@@ -54,7 +54,7 @@
+     Returns None when there is nothing to add, so the caller's kwargs and DSN are used untouched.
+     """
+     own = connect_kwargs.get("options") if "options" in connect_kwargs else dsn_options(connection_string)
+-    added = [f"-c {name}={ms}" for name, ms in configured_timeouts(options).items() if not _sets(own, name)]
++    added = [f"-c {name}={ms}" for name, ms in configured_timeouts(options).items()]
+     if not added:
+         return None
+     return " ".join(([str(own)] if own else []) + added)

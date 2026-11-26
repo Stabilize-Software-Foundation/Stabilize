@@ -1,0 +1,12 @@
+test-id: tests/test_processor_wake.py::test_release_restores_the_attempt_and_keeps_the_store_retry_budget[sqlite]
+--- a/src/stabilize/queue/sqlite/claim.py
++++ b/src/stabilize/queue/sqlite/claim.py
+@@ -176,7 +176,7 @@
+         msg_id = row_id(message.message_id)
+         conn = self._get_connection()
+         cursor = conn.execute(
+-            f"UPDATE {self.table_name} SET locked_until = NULL, attempts = MAX(attempts - 1, 0), "
++            f"UPDATE {self.table_name} SET locked_until = NULL, store_retries = 0, attempts = MAX(attempts - 1, 0), "
+             "version = version + 1 WHERE id = :id AND (:attempts IS NULL OR attempts = :attempts) "
+             "AND stabilize_tenant = :tenant",
+             {"id": msg_id, "attempts": getattr(message, "attempts", None), "tenant": self.tenant},

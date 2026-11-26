@@ -104,7 +104,7 @@ def process_response(
         if continue_on_failure:
             return TaskResult.failed_continue(
                 error=str(e),
-                outputs={"status_code": status_code, "url": final_url},
+                outputs={"status_code": status_code, "response_status": status_code, "url": final_url},
             )
         return TaskResult.terminal(error=str(e))
 
@@ -117,10 +117,14 @@ def process_response(
         "url": final_url,
         "content_type": content_type,
         "content_length": content_length,
+        "response_status": status_code,
+        "response_headers": response_headers,
+        "response_body": body,
     }
 
     if body_json is not None:
         outputs["body_json"] = body_json
+        outputs["response_body_json"] = body_json
 
     # Check expected status
     expected_status = context.get("expected_status")
