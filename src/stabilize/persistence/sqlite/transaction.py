@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from stabilize.persistence.sqlite.store import SqliteWorkflowStore
     from stabilize.queue.messages import Message
 
+
+logger = logging.getLogger(__name__)
 
 _QUEUE_TABLE_SET = ",\n                queue_table = COALESCE(:queue_table, queue_table)"
 
@@ -64,6 +67,8 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
         self._queue = queue
         self._queue_table = _queue_table_for(store, queue)
         self._due_in: float | None = None
+        self._acked: tuple[str, bool] | None = None
+        self._claimed: Any = None
         # Track stage objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._marked_ids: list[str] = []
@@ -72,13 +77,32 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
 
     def on_commit(self) -> None:
         """Record the marks and pushes this transaction committed, and the task rows it wrote."""
-        from stabilize.persistence.committed_marks import record_committed
+        from stabilize.persistence.committed_marks import publish_claim, record_acked, record_committed
 
         record_committed(self._marked_ids, pushed=self._pushed)
+        if self._claimed is not None:
+            publish_claim(self._claimed)
+        if self._acked is not None:
+            record_acked(self._acked[0])
+            if not self._acked[1]:
+                logger.warning("ack(%s): the lease was taken by another worker; not deleted", self._acked[0])
         commit_captured(self._written_tasks)
         self._written_tasks = []
         if self._due_in is not None:
             self._announce(self._due_in)
+
+    def _claim(self, message: Message) -> bool:
+        from stabilize.persistence.committed_marks import hold_claim, may_claim
+
+        push_claimed = getattr(self._queue, "push_claimed", None)
+        if not callable(push_claimed) or not may_claim(self._queue):
+            return False
+        claimed = push_claimed(message, self._conn)
+        if claimed is None:
+            return False
+        self._claimed = claimed
+        hold_claim()
+        return True
 
     def _announce(self, due_in: float) -> None:
         announce = getattr(self._queue, "announce_ready", None)
@@ -102,6 +126,11 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
             stage.version = original_version
         self._staged_objects.clear()
         self._written_tasks = []
+        if self._claimed is not None:
+            from stabilize.persistence.committed_marks import drop_claim
+
+            self._claimed = None
+            drop_claim()
 
     def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
         """Store or update a stage within the transaction.
@@ -255,6 +284,9 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
         """
         from stabilize.queue.messages import get_message_type_name
 
+        if delay <= 0 and self._claim(message):
+            self._pushed = True
+            return
         deliver_at = datetime.now(UTC)
         if delay > 0:
             deliver_at = deliver_at + timedelta(seconds=delay)
@@ -307,7 +339,9 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
         handler_type: str | None = None,
         execution_id: str | None = None,
     ) -> bool:
-        """Mark a message as successfully processed within the transaction."""
+        """Mark a message processed; the delivery being handled also loses its queue row, fenced on its attempt."""
+        from stabilize.persistence.committed_marks import delivery_fence
+
         cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO processed_messages (
@@ -331,6 +365,14 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
             ).fetchone()
             refuse_foreign_row("processed_messages", message_id, held[0] if held else None, self._tenant)
             raise DuplicateDeliveryError(message_id)
+        fence = delivery_fence(message_id, self._queue_table)
+        if fence is not None:
+            gone = self._conn.execute(
+                f"DELETE FROM {self._queue_table} "
+                "WHERE id = :id AND attempts = :attempts AND stabilize_tenant = :tenant",
+                {"id": fence[0], "attempts": fence[1], "tenant": self._tenant},
+            )
+            self._acked = (message_id, gone.rowcount == 1)
         self._marked_ids.append(message_id)
         return True
 

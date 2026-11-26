@@ -20,6 +20,8 @@ from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
 from stabilize.persistence.schema_check import check_postgres_tables
+from stabilize.persistence.pool_timeouts import report_findings
+from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.tenancy import (
     EngineSchemaError,
     ModeReader,
@@ -120,7 +122,7 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
-        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+        with acquire(self._pool) as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             self._check_schema_once(conn)
             yield conn
 
@@ -129,6 +131,7 @@ class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
             return
         if self._schema_state is not False:
             raise self._schema_state
+        report_findings(self._pool)
         try:
             check_postgres_tables(
                 conn, self.schema, [self.table_name, f"{self.table_name}_dlq"], lambda: self._mode.last or "single"

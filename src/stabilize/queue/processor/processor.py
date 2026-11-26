@@ -253,13 +253,15 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         self._stop_event.clear()
         self._subscribe_wake()
         self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
-        self._poll_thread = threading.Thread(target=in_context(self._poll_loop), daemon=True)
+        self._poll_thread = threading.Thread(target=in_context(self._watching(self._poll_loop)), daemon=True)
         self._poll_thread.start()
 
         # Opt-in: periodic background recovery sweeps for long-running/distributed
         # deployments (catch workflows orphaned by a crashed peer worker).
         if self.config.recovery_interval_seconds and self.config.recovery_interval_seconds > 0:
-            self._recovery_thread = threading.Thread(target=in_context(self._recovery_loop), daemon=True)
+            self._recovery_thread = threading.Thread(
+                target=in_context(self._watching(self._recovery_loop)), daemon=True
+            )
             self._recovery_thread.start()
 
         self._retention_thread = start_retention_thread(self)
@@ -310,6 +312,11 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             )
         logger.info("Queue processor stopped")
         return remaining
+
+    def _watching(self, target: Callable[..., Any]) -> Callable[..., Any]:
+        from stabilize.persistence.stop_signal import bound_to
+
+        return bound_to(self._stop_event, target)
 
     def _subscribe_wake(self) -> None:
         from stabilize.queue import wake

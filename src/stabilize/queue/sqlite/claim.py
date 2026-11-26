@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.message_ids import delivery_key, row_id
+from stabilize.queue.messages import get_message_type_name
+from stabilize.queue.sqlite.serialization import serialize_message
 
 if TYPE_CHECKING:
     import sqlite3
@@ -29,6 +32,8 @@ def sqlite_wake_key(manager: Any, connection_string: str, table_name: str, tenan
 
 
 class SqliteClaimMixin:
+    counts_deliveries = True
+
     table_name: str
     tenant: str
     connection_string: str
@@ -125,6 +130,44 @@ class SqliteClaimMixin:
         self._pending[msg_id] = {"message": message, "type": msg_type}
         logger.debug("Polled %s (id=%s, attempts=%d)", msg_type, msg_id, message.attempts)
         return message
+
+    def push_claimed(self, message: Message, connection: Any) -> Message | None:
+        """Insert *message* on *connection* already leased to this consumer; None when its payload does not decode."""
+        message_type = get_message_type_name(message)
+        payload = serialize_message(message)
+        try:
+            delivered = decode_message(message_type, payload)
+        except MessageDecodeError:
+            return None
+        now = datetime.now(UTC)
+        cursor = connection.execute(
+            f"""
+            INSERT INTO {self.table_name} (
+                message_id, message_type, payload, deliver_at, attempts, max_attempts, version,
+                locked_until, stabilize_tenant
+            ) VALUES (
+                :message_id, :type, :payload, :deliver_at, 1, :max_attempts, 1, :locked_until, :tenant
+            )
+            """,
+            {
+                "message_id": str(uuid.uuid4()),
+                "type": message_type,
+                "payload": payload,
+                "deliver_at": now.isoformat(),
+                "max_attempts": self.max_attempts,
+                "locked_until": (now + self.lock_duration).isoformat(),
+                "tenant": self.tenant,
+            },
+        )
+        inserted = cursor.lastrowid
+        if inserted is None:
+            raise RuntimeError(f"SQLite reported no row id for a message inserted into {self.table_name}")
+        msg_id = int(inserted)
+        delivered.message_id = delivery_key(self.table_name, msg_id)
+        delivered.attempts = 1
+        delivered.store_retries = 0
+        self._pending[msg_id] = {"message": delivered, "type": message_type}
+        return delivered
 
     def release(self, message: Message) -> bool:
         """Hand back a claimed message that no handler received: visible at once, its attempt not spent."""

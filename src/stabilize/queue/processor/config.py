@@ -88,6 +88,9 @@ class QueueProcessorConfig:
     recovery_max_age_hours: float = 24.0
     # How often the poll loop samples queue_depth, queue_lag_seconds and active_workflows; 0 disables.
     metrics_sample_interval_seconds: float = 30.0
+    # How many successors in a row a worker handles itself after the message it was given. A delivery that
+    # commits one undelayed successor inserts it already leased to this worker. 0 sends every message to a poll.
+    continuation_hops: int = 16
 
     @classmethod
     def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:

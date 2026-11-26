@@ -46,6 +46,8 @@ from stabilize.persistence.store import (
 )
 from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
+from stabilize.persistence.pool_timeouts import report_findings
+from stabilize.persistence.stop_signal import acquire
 from stabilize.persistence.tenancy import (
     EngineSchemaError,
     ModeReader,
@@ -104,8 +106,8 @@ class PostgresWorkflowStore(
                 ran with MG_SCHEMA does not need the caller to hand-write one
                 into the DSN.
             options: Pool and connection options. With none supplied,
-                connections inherit the server defaults and carry no
-                statement_timeout and no lock_timeout.
+                connections carry a 30 s lock_timeout and no
+                statement_timeout.
             health_timeout: Bound on is_healthy()'s wait for a connection.
             tenant: The tenant this store reads and writes; '' in single-tenant mode.
         """
@@ -126,7 +128,7 @@ class PostgresWorkflowStore(
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
-        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+        with acquire(self._pool) as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             self._check_schema_once(conn)
             yield conn
 
@@ -135,6 +137,7 @@ class PostgresWorkflowStore(
             return
         if self._schema_state is not False:
             raise self._schema_state
+        report_findings(self._pool)
         try:
             check_postgres_tables(conn, self.schema, STORE_TABLES, lambda: self._mode.last or "single")
         except EngineSchemaError as exc:

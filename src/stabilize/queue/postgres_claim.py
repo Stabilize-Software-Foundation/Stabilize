@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.message_ids import delivery_key, row_id
+from stabilize.queue.messages import get_message_type_name
 from stabilize.queue.postgres_lookups import DELIVERABLE
 
 if TYPE_CHECKING:
@@ -31,6 +33,12 @@ CLAIM_SQL = (
     "EXTRACT(EPOCH FROM (NOW() - deliver_at)) AS ready_for"
 )
 
+CLAIMED_PUSH_SQL = (
+    "INSERT INTO {table} (message_id, message_type, payload, deliver_at, attempts, locked_until, stabilize_tenant) "
+    "VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, NOW(), 1, "
+    "NOW() + %(lock_seconds)s * INTERVAL '1 second', %(tenant)s) RETURNING id"
+)
+
 RELEASE_SQL = (
     "UPDATE {table} SET locked_until = NULL, attempts = GREATEST(attempts - 1, 0) "
     "WHERE id = %(id)s AND (%(attempts)s::int IS NULL OR attempts = %(attempts)s::int) "
@@ -39,6 +47,8 @@ RELEASE_SQL = (
 
 
 class PostgresClaimMixin:
+    counts_deliveries = True
+
     table_name: str
     tenant: str
     connection_string: str
@@ -56,6 +66,8 @@ class PostgresClaimMixin:
         def move_to_dlq(self, message_id: int | str, error: str | None = None) -> None: ...
 
         def announce_ready(self, due_in: float = 0.0) -> None: ...
+
+        def _serialize_message(self, message: Message) -> str: ...
 
     def wake_key(self) -> Hashable | None:
         return ("postgres", self.connection_string, self.schema or "", self.table_name, self.tenant)
@@ -106,6 +118,34 @@ class PostgresClaimMixin:
         message.__dict__["_ready_for"] = float(ready_for) if ready_for is not None else None
         self._pending[msg_id] = {"message": message, "type": msg_type}
         return message
+
+    def push_claimed(self, message: Message, connection: Any) -> Message | None:
+        """Insert *message* on *connection* already leased to this consumer; None when its payload does not decode."""
+        message_type = get_message_type_name(message)
+        payload = self._serialize_message(message)
+        try:
+            delivered = decode_message(message_type, payload)
+        except MessageDecodeError:
+            return None
+        with connection.cursor() as cur:
+            cur.execute(
+                CLAIMED_PUSH_SQL.format(table=self.table_name),
+                {
+                    "message_id": str(uuid.uuid4()),
+                    "type": message_type,
+                    "payload": payload,
+                    "lock_seconds": self.lock_duration.total_seconds(),
+                    "tenant": self.tenant,
+                },
+            )
+            row = cur.fetchone()
+        msg_id = row["id"]
+        delivered.message_id = delivery_key(self.table_name, msg_id)
+        delivered.attempts = 1
+        delivered.store_retries = 0
+        self._pending[msg_id] = {"message": delivered, "type": message_type}
+        self._size_cache = None
+        return delivered
 
     def release(self, message: Message) -> bool:
         """Hand back a claimed message that no handler received: visible at once, its attempt not spent."""

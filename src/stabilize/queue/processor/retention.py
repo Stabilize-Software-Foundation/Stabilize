@@ -16,6 +16,7 @@ import threading
 import time
 from typing import Any
 
+from stabilize.persistence.stop_signal import bound_to
 from stabilize.threads import in_context
 
 logger = logging.getLogger(__name__)
@@ -77,8 +78,8 @@ def start_retention_thread(processor: Any) -> threading.Thread | None:
     interval = getattr(processor.config, "retention_sweep_interval_seconds", 0.0)
     if not interval or interval <= 0 or processor._store is None:
         return None
-    thread = threading.Thread(
-        target=in_context(retention_loop), args=(processor,), daemon=True, name="stabilize-retention"
-    )
+    stop_event = getattr(processor, "_stop_event", None)
+    target = bound_to(stop_event, retention_loop) if stop_event is not None else retention_loop
+    thread = threading.Thread(target=in_context(target), args=(processor,), daemon=True, name="stabilize-retention")
     thread.start()
     return thread

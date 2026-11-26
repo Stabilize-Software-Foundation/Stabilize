@@ -7,7 +7,7 @@ import threading
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -33,6 +33,13 @@ class _Delivery:
     dropped_events: int = 0
     active: bool = False
     exempt: int = 0
+    delivered_id: str | None = None
+    delivered_attempts: int | None = None
+    acked: set[str] = field(default_factory=set)
+    hops: int = 0
+    hop_queue: Any = None
+    claim_held: bool = False
+    claimed: Any = None
 
 
 _recent: deque[DeliveryDefect] = deque(maxlen=DEFECT_LIMIT)
@@ -76,14 +83,93 @@ def record_dropped_events(count: int) -> None:
         state.dropped_events += count
 
 
-def begin_delivery() -> None:
-    """Forget the previous delivery on this thread and start counting for the next one."""
+def begin_delivery(message: Any = None) -> None:
+    """Forget the previous delivery on this thread and start counting for the next one.
+
+    *message* is the queue delivery being handled; its id and attempt let the transaction that marks
+    it processed remove its queue row.
+    """
     clear_committed()
-    _state().active = True
+    state = _state()
+    state.active = True
+    attempts = getattr(message, "attempts", None)
+    state.delivered_id = getattr(message, "message_id", None)
+    state.delivered_attempts = attempts if isinstance(attempts, int) and not isinstance(attempts, bool) else None
 
 
 def end_delivery() -> None:
-    _state().active = False
+    state = _state()
+    state.active = False
+    state.delivered_id = None
+    state.delivered_attempts = None
+
+
+def delivery_fence(message_id: str, queue_table: str) -> tuple[int, int] | None:
+    """The queue row id and attempt of the delivery being handled, when *message_id* names it on *queue_table*."""
+    from stabilize.queue.message_ids import own_row_ids
+
+    state = _state()
+    if not state.active or state.delivered_id != message_id or state.delivered_attempts is None:
+        return None
+    owned = own_row_ids(queue_table, [message_id])
+    if not owned:
+        return None
+    return next(iter(owned)), state.delivered_attempts
+
+
+def allow_continuation(hops: int, queue_key: Any) -> None:
+    """Let the next delivery on this thread claim one successor on the queue named by *queue_key*; 0 forbids it."""
+    state = _state()
+    state.hops = max(0, int(hops))
+    state.hop_queue = queue_key if hops > 0 else None
+    state.claim_held = False
+    state.claimed = None
+
+
+def may_claim(queue: Any) -> bool:
+    """Whether a transaction of the delivery being handled may insert a successor already leased to this worker."""
+    state = _state()
+    if not state.active or state.exempt or state.hops <= 0 or state.claim_held or state.claimed is not None:
+        return False
+    key = getattr(queue, "wake_key", None)
+    return callable(key) and key() == state.hop_queue
+
+
+def hold_claim() -> None:
+    _state().claim_held = True
+
+
+def drop_claim() -> None:
+    _state().claim_held = False
+
+
+def publish_claim(message: Any) -> None:
+    """Record the successor a committed transaction inserted already leased to this worker."""
+    state = _state()
+    state.claim_held = False
+    state.claimed = message
+
+
+def take_claimed() -> Any:
+    """The successor claimed by the delivery that just ended on this thread, once; None when there is none."""
+    state = _state()
+    claimed, state.claimed = state.claimed, None
+    state.claim_held = False
+    return claimed
+
+
+def record_acked(message_id: str) -> None:
+    """Record that a committed transaction removed the queue row of *message_id*."""
+    _state().acked.add(message_id)
+
+
+def consume_acked(message_id: str) -> bool:
+    """Return True, and forget it, when a committed transaction on this thread removed the row of *message_id*."""
+    state = _state()
+    if message_id in state.acked:
+        state.acked.discard(message_id)
+        return True
+    return False
 
 
 def log_defect(defect: DeliveryDefect) -> None:
@@ -146,3 +232,4 @@ def clear_committed() -> None:
     state.bare_pushes.clear()
     state.bare_events.clear()
     state.dropped_events = 0
+    state.acked.clear()

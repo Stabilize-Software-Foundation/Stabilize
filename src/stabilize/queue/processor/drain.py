@@ -44,6 +44,8 @@ class SynchronousDrainMixin:
 
         def _handle_message(self, message: Message) -> None: ...
 
+        def _settle_or_ack(self, message: Message) -> None: ...
+
         def _check_dlq(self) -> None: ...
 
     def _warn_once_if_lease_unrenewed(self) -> None:
@@ -80,7 +82,7 @@ class SynchronousDrainMixin:
             heartbeat_stop = start_lock_heartbeat(self.queue, self.config, message)
             try:
                 self._handle_message(message)
-                self.queue.ack(message)
+                self._settle_or_ack(message)
             except DuplicateDeliveryError as e:
                 logger.info("%s; acknowledged without a second push", e)
                 self.queue.ack(message)

@@ -20,10 +20,13 @@ DEFAULT_HEALTH_TIMEOUT_SECONDS = 2.0
 class PoolOptions:
     """Options applied when a PostgreSQL pool is created.
 
-    stabilize supplies no ``statement_timeout`` and no ``lock_timeout`` of its
-    own: without ``connect_kwargs`` or a DSN carrying ``options=-c ...``, a
-    connection inherits the server defaults, and a blocked query holds a
-    backend slot for as long as the server allows.
+    ``lock_timeout`` (30 s by default), ``statement_timeout`` and
+    ``idle_in_transaction_session_timeout`` (both unset by default) are seconds,
+    sent as libpq ``options`` when a connection is opened. A value the caller
+    set for the same setting in ``connect_kwargs["options"]`` or in the DSN's
+    ``options`` is kept. ``None`` leaves the server default. A statement that
+    exceeds ``lock_timeout`` fails with SQLSTATE 55P03 and its message is
+    redelivered.
 
     ``acquire_timeout`` bounds how long a borrow waits for a free connection.
     psycopg_pool's own default is 30s, which is the latency an unreachable
@@ -64,8 +67,15 @@ class PoolOptions:
     reset: Callable[[Any], None] | None = None
     tenant_setting: str | None = None
     audit_key: bytes | None = None
+    lock_timeout: float | None = 30.0
+    statement_timeout: float | None = None
+    idle_in_transaction_session_timeout: float | None = None
 
     def __post_init__(self) -> None:
+        from stabilize.persistence.pool_timeouts import TIMEOUT_SETTINGS, validate_timeout
+
+        for name in TIMEOUT_SETTINGS:
+            validate_timeout(name, getattr(self, name))
         if self.max_idle is not None and (
             isinstance(self.max_idle, bool) or not isinstance(self.max_idle, (int, float)) or not self.max_idle > 0
         ):
@@ -91,6 +101,9 @@ class PoolOptions:
             _identity(self.reset),
             self.tenant_setting,
             self.audit_key,
+            self.lock_timeout,
+            self.statement_timeout,
+            self.idle_in_transaction_session_timeout,
         )
 
 

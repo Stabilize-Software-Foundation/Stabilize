@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.errors.store_errors import is_store_unavailable
+from stabilize.persistence.stop_signal import bound_to
 from stabilize.persistence.tenancy import TenancyModeChanged
 from stabilize.queue.messages import Message, get_message_type_name
+from stabilize.queue.processor.continuation import run_chain
 from stabilize.queue.processor.lease_guard import start_lock_heartbeat
 from stabilize.queue.processor.redelivery import redelivery_delay
 from stabilize.threads import in_context
@@ -31,6 +33,9 @@ class MessageSubmissionMixin:
     _in_flight: set[str]
     _in_flight_lock: threading.Lock
     _executor: ThreadPoolExecutor | None
+    _stopping: bool
+    _fault: BaseException | None
+    _stop_event: threading.Event
 
     if TYPE_CHECKING:
 
@@ -39,6 +44,8 @@ class MessageSubmissionMixin:
         def _latch(self, exc: BaseException) -> None: ...
 
         def _worker_finished(self) -> None: ...
+
+        def _settle_or_ack(self, message: Message) -> None: ...
 
     def _start_lock_heartbeat(self, message: Message) -> threading.Event | None:
         """Renew this message's queue lock while its handler executes."""
@@ -60,37 +67,9 @@ class MessageSubmissionMixin:
         """
 
         def process_and_ack() -> None:
-            msg_id = getattr(message, "message_id", None)
-            if msg_id:
-                with self._in_flight_lock:
-                    self._in_flight.add(msg_id)
-            heartbeat_stop = self._start_lock_heartbeat(message)
             try:
-                self._handle_message(message)
-                self.queue.ack(message)
-            except DuplicateDeliveryError as e:
-                logger.info("%s; acknowledged without a second push", e)
-                self.queue.ack(message)
-            except TenancyModeChanged as e:
-                self._latch(e)
-            except Exception as e:
-                logger.exception("Error handling %s", get_message_type_name(message))
-                # Store error context for debugging and auditing
-                # This allows tracking of failure patterns across retries
-                message.set_error_context(e)
-                # Message will be reprocessed after lock expires or reschedule
-                unavailable = is_store_unavailable(e)
-                self.queue.reschedule(
-                    message,
-                    redelivery_delay(self.config.retry_delay, message, unavailable),
-                    store_unavailable=unavailable,
-                )
+                bound_to(self._stop_event, run_chain)(self, message)
             finally:
-                if heartbeat_stop is not None:
-                    heartbeat_stop.set()
-                if msg_id:
-                    with self._in_flight_lock:
-                        self._in_flight.discard(msg_id)
                 self._worker_finished()
 
         try:
@@ -102,3 +81,37 @@ class MessageSubmissionMixin:
                 self._active_count -= 1
             self.queue.reschedule(message, timedelta(0))
             raise
+
+    def _deliver(self, message: Message) -> bool:
+        """Handle one message and acknowledge, reschedule or latch as its outcome asks; True when it ended cleanly."""
+        msg_id = getattr(message, "message_id", None)
+        if msg_id:
+            with self._in_flight_lock:
+                self._in_flight.add(msg_id)
+        heartbeat_stop = self._start_lock_heartbeat(message)
+        try:
+            self._handle_message(message)
+            self._settle_or_ack(message)
+        except DuplicateDeliveryError as e:
+            logger.info("%s; acknowledged without a second push", e)
+            self.queue.ack(message)
+        except TenancyModeChanged as e:
+            self._latch(e)
+        except Exception as e:
+            logger.exception("Error handling %s", get_message_type_name(message))
+            message.set_error_context(e)
+            unavailable = is_store_unavailable(e)
+            self.queue.reschedule(
+                message,
+                redelivery_delay(self.config.retry_delay, message, unavailable),
+                store_unavailable=unavailable,
+            )
+        else:
+            return True
+        finally:
+            if heartbeat_stop is not None:
+                heartbeat_stop.set()
+            if msg_id:
+                with self._in_flight_lock:
+                    self._in_flight.discard(msg_id)
+        return False
