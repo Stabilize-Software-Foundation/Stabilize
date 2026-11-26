@@ -355,6 +355,12 @@ class WorkflowRecovery:
 
         if self.queue.has_pending_message_for_execution(workflow.id):
             return RecoveryResult(workflow_id=workflow.id, status="skipped", message="A message is already queued")
+        if self._dead_letter_moved_at(StartWorkflow(execution_id=workflow.id), workflow.id) is not None:
+            return RecoveryResult(
+                workflow_id=workflow.id,
+                status="dead_lettered",
+                message="StartWorkflow sits in the dead-letter queue; replay it or cancel the workflow",
+            )
         try:
             with delivery_exempt():
                 self.queue.push(StartWorkflow(execution_type=workflow.type.value, execution_id=workflow.id))
