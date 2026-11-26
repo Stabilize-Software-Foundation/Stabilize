@@ -127,16 +127,30 @@ def _succeeded(store: Any, workflow_id: str) -> bool:
     return bool(store.retrieve(workflow_id).status.name == "SUCCEEDED")
 
 
-def _await_all(store: Any, ids: list[str], seconds: float) -> float:
+def _drained(queue: Any) -> bool:
+    counts = queue.counts()
+    return bool(counts.pending == 0 and counts.processing == 0)
+
+
+def _await_all(store: Any, queue: Any, ids: list[str], seconds: float) -> float:
+    """Wait until the queue holds no message, with one count per sweep, then check every workflow once.
+
+    The first version of this benchmark read the status of every pending workflow in a loop. With 500
+    to 2,000 workflows that loop put more load on PostgreSQL and on the interpreter than the engine
+    did, and the rates it reported were its own.
+    """
     deadline = time.monotonic() + seconds
-    pending = list(ids)
-    while pending and time.monotonic() < deadline:
-        pending = [i for i in pending if not _succeeded(store, i)]
-        if pending:
-            time.sleep(0.02)
-    if pending:
-        raise SystemExit(f"{len(pending)} of {len(ids)} workflows did not finish in {seconds} s")
-    return time.monotonic()
+    empty = 0
+    while empty < 2:
+        if time.monotonic() >= deadline:
+            raise SystemExit(f"the queue did not drain in {seconds} s: {queue.counts()}")
+        empty = empty + 1 if _drained(queue) else 0
+        time.sleep(0.05)
+    end = time.monotonic()
+    unfinished = [i for i in ids if not _succeeded(store, i)]
+    if unfinished:
+        raise SystemExit(f"{len(unfinished)} of {len(ids)} workflows are not SUCCEEDED although the queue is empty")
+    return end
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -164,7 +178,7 @@ def paced(dsn: str, rate: float = 5.0, seconds: float = 30.0, workers: int = 4, 
             store.store(workflow)
             started[str(workflow.id)] = time.monotonic()
             orchestrator.start(workflow)
-        _await_all(store, list(started), 600.0)
+        _await_all(store, queue, list(started), 600.0)
     finally:
         processor.stop()
         queue.close()
@@ -224,7 +238,7 @@ def preloaded(dsn: str, count: int = 500, workers: int = 8, poll_ms: int = 50) -
     begin = time.monotonic()
     processor.start()
     try:
-        end = _await_all(store, ids, 900.0)
+        end = _await_all(store, queue, ids, 900.0)
     finally:
         processor.stop()
         queue.close()
@@ -305,7 +319,7 @@ def threaded_counts(dsn: str, workflows: int = 20) -> dict[str, Any]:
     processor.start()
     counters = _Counters()
     try:
-        _await_all(store, [str(warm.id)], 60.0)
+        _await_all(store, queue, [str(warm.id)], 60.0)
         restore = counters.install(queue)
         try:
             for _ in range(workflows):
@@ -393,7 +407,7 @@ def fleet(dsn: str, processes: int, count: int = 2000) -> dict[str, Any]:
             subprocess.Popen([sys.executable, __file__, "--fleet-child", dsn, path, "900"]) for path in effects
         ]
         try:
-            end = _await_all(store, ids, 900.0)
+            end = _await_all(store, queue, ids, 900.0)
         finally:
             for path in effects:
                 Path(path + ".stop").touch()
@@ -468,8 +482,8 @@ def compare(old_path: str, new_path: str) -> int:
     check("polled messages per workflow <= 1.2", npoll <= 1.2, f"{npoll} (was {opoll})")
     one, extra = new["synchronous_statements"]["one_stage"], new["synchronous_statements"]["each_extra_stage"]
     old_one, old_extra = old["synchronous_statements"]["one_stage"], old["synchronous_statements"]["each_extra_stage"]
-    check("tenancy statements, one stage <= 108", one <= 108, f"{one} (was {old_one})")
-    check("tenancy statements, each extra stage <= 79", extra <= 79, f"{extra} (was {old_extra})")
+    check("tenancy statements, one stage: at least 28 fewer", one <= old_one - 28, f"{one} (was {old_one})")
+    check("tenancy statements, each extra stage: at least 20 fewer", extra <= old_extra - 20, f"{extra} (was {old_extra})")
     for name in ("fleet_2", "fleet_4"):
         if name not in new:
             check(f"{name} ran", False, "missing from the new run; pass --fleet")

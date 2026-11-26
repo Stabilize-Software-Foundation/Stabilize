@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import pytest
@@ -12,6 +11,7 @@ pytest.importorskip("psycopg")
 from stabilize.persistence.pool_options import PoolOptions  # noqa: E402
 from stabilize.persistence.postgres import PostgresWorkflowStore  # noqa: E402
 from stabilize.queue.postgres import PostgresQueue  # noqa: E402
+from tests.log_capture import captured  # noqa: E402
 
 
 def _show(part: Any, setting: str) -> str:
@@ -109,32 +109,28 @@ def test_a_timeout_that_is_not_a_positive_number_is_refused(value: Any) -> None:
         PoolOptions(lock_timeout=value)
 
 
-def test_a_connection_that_does_not_hold_the_configured_timeout_is_reported(
-    postgres_url: str, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_a_connection_that_does_not_hold_the_configured_timeout_is_reported(postgres_url: str) -> None:
     def override(conn: Any) -> None:
         conn.execute("SET lock_timeout = '1s'")
         conn.commit()
 
     store = PostgresWorkflowStore(postgres_url, options=PoolOptions(configure=override))
     try:
-        with caplog.at_level(logging.WARNING):
+        with captured() as records:
             store.exists("no-such-workflow")
-        assert any("lock_timeout" in r.getMessage() and "1s" in r.getMessage() for r in caplog.records), (
+        assert any("lock_timeout" in r.getMessage() and "1s" in r.getMessage() for r in records), (
             "a connection holding lock_timeout 1s where 30s is configured was not reported"
         )
     finally:
         store.close()
 
 
-def test_a_connection_that_holds_the_configured_timeout_is_not_reported(
-    postgres_url: str, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_a_connection_that_holds_the_configured_timeout_is_not_reported(postgres_url: str) -> None:
     store = PostgresWorkflowStore(postgres_url)
     try:
-        with caplog.at_level(logging.WARNING):
+        with captured() as records:
             store.exists("no-such-workflow")
-        assert not any("lock_timeout" in r.getMessage() for r in caplog.records)
+        assert not any("lock_timeout" in r.getMessage() for r in records)
     finally:
         store.close()
 

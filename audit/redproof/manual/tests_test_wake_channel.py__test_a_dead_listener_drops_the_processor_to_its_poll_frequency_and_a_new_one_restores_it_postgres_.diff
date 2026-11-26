@@ -1,12 +1,12 @@
 test-id: tests/test_wake_channel.py::test_a_dead_listener_drops_the_processor_to_its_poll_frequency_and_a_new_one_restores_it[postgres]
 --- a/src/stabilize/queue/postgres_wake.py
 +++ b/src/stabilize/queue/postgres_wake.py
-@@ -133,7 +133,7 @@
-         proved_at = self._proved_at
-         if proved_at is None:
-             return False
--        return time.monotonic() - proved_at <= self._ping_seconds + PROOF_GRACE_SECONDS
-+        return True
- 
-     def start(self) -> None:
-         require_psycopg()
+@@ -191,7 +191,7 @@
+                 reported = False
+                 self._listen()
+             except Exception as error:
+-                self._proved_at = None
++                self._sent += 0
+                 if self._stop.is_set():
+                     break
+                 if not reported:

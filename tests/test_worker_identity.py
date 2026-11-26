@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from collections.abc import Callable, Iterator
 from datetime import timedelta
@@ -17,6 +16,7 @@ from stabilize.persistence.tenancy import EngineSchemaError  # noqa: E402
 from stabilize.queue.messages import StartWorkflow  # noqa: E402
 from stabilize.queue.postgres import PostgresQueue  # noqa: E402
 from stabilize.queue.processor.config import QueueProcessorConfig  # noqa: E402
+from tests.log_capture import captured  # noqa: E402
 
 LEASE = timedelta(seconds=10)
 
@@ -114,7 +114,7 @@ def test_only_the_leases_of_the_same_worker_id_are_released(queues: Callable[...
 
 
 def test_a_live_session_of_another_incarnation_blocks_the_release(
-    queues: Callable[..., PostgresQueue], postgres_url: str, caplog: pytest.LogCaptureFixture
+    queues: Callable[..., PostgresQueue], postgres_url: str
 ) -> None:
     import psycopg
 
@@ -124,7 +124,7 @@ def test_a_live_session_of_another_incarnation_blocks_the_release(
     processor = _processor(queue, handled)
     with psycopg.connect(postgres_url, application_name="stabilize/0.0.0 w=w1 i=feedfacecafe") as twin:
         twin.execute("SELECT 1")
-        with caplog.at_level(logging.WARNING):
+        with captured() as records:
             processor.start()
             try:
                 time.sleep(2.0)
@@ -133,7 +133,7 @@ def test_a_live_session_of_another_incarnation_blocks_the_release(
     assert not handled, "the processor released leases while another incarnation of its worker id had a session"
     assert processor.last_reclaim.released == 0
     assert "another incarnation" in processor.last_reclaim.reason
-    assert any("worker id" in r.getMessage() for r in caplog.records), "the withheld release was not logged"
+    assert any("worker id" in r.getMessage() for r in records), "the withheld release was not logged"
 
 
 def test_a_session_of_another_worker_id_does_not_block_the_release(

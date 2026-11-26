@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -16,6 +15,7 @@ from stabilize import QueueProcessor
 from stabilize.queue.messages import StartWorkflow
 from stabilize.queue.processor.config import QueueProcessorConfig
 from tests.event_stack import Stack, open_stack
+from tests.log_capture import captured
 
 
 @pytest.fixture
@@ -115,10 +115,10 @@ def test_without_idle_poll_ms_the_processor_polls_at_its_poll_frequency(
         processor.stop()
 
 
-def test_on_sqlite_the_idle_poll_never_stretches(stack: Stack, caplog: pytest.LogCaptureFixture) -> None:
+def test_on_sqlite_the_idle_poll_never_stretches(stack: Stack) -> None:
     if stack.backend != "sqlite":
         pytest.skip("the SQLite queue has no channel across processes")
-    with caplog.at_level(logging.WARNING):
+    with captured() as records:
         processor = _idle_processor(stack.queue, [])
         processor.start()
         try:
@@ -127,7 +127,7 @@ def test_on_sqlite_the_idle_poll_never_stretches(stack: Stack, caplog: pytest.Lo
             assert processor.idle_interval_ms == 50
         finally:
             processor.stop()
-    assert any("idle_poll_ms" in r.getMessage() for r in caplog.records), "the unusable idle_poll_ms was not reported"
+    assert any("idle_poll_ms" in r.getMessage() for r in records), "the unusable idle_poll_ms was not reported"
 
 
 def test_a_notifying_push_from_outside_the_process_hub_wakes_an_idle_processor(
@@ -156,7 +156,7 @@ def test_a_notifying_push_from_outside_the_process_hub_wakes_an_idle_processor(
 
 
 def test_a_publisher_that_does_not_notify_trips_the_guard_and_the_stretch_comes_back(
-    stack: Stack, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    stack: Stack, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _postgres_only(stack)
     queue = _notifying_queue(request, wake_notify=True)
@@ -167,7 +167,7 @@ def test_a_publisher_that_does_not_notify_trips_the_guard_and_the_stretch_comes_
     try:
         assert _wait(lambda: processor.wake_channel_proven and processor.idle_interval_ms == 1000, 10.0)
         _silence_the_process_hub(monkeypatch)
-        with caplog.at_level(logging.WARNING):
+        with captured() as records:
             silent.push(_message("silent-0"))
             time.sleep(0.5)
             silent.push(_message("silent-1"))
@@ -175,7 +175,7 @@ def test_a_publisher_that_does_not_notify_trips_the_guard_and_the_stretch_comes_
             assert _wait(lambda: processor.idle_interval_ms == 50, 2.0), (
                 "a message sat ready with no notification and the processor kept its stretched idle poll"
             )
-        assert any("wake_notify" in r.getMessage() for r in caplog.records), "the remedy was not logged"
+        assert any("wake_notify" in r.getMessage() for r in records), "the remedy was not logged"
         assert _wait(lambda: processor.idle_interval_ms == 1000, 10.0), (
             "the stretched idle poll did not come back after the guard's hold"
         )
@@ -201,12 +201,32 @@ def test_a_dead_listener_drops_the_processor_to_its_poll_frequency_and_a_new_one
                 ("% wake-listener",),
             ).fetchone()
         assert killed is not None and killed[0] >= 1, "no listener session was found to terminate"
-        assert _wait(lambda: processor.idle_interval_ms == 50, 12.0), (
-            "the listener was terminated and the processor kept its stretched idle poll"
+        assert _wait(lambda: processor.idle_interval_ms == 50, 2.0), (
+            "the listener was terminated and the processor kept its stretched idle poll for more than 2 s"
         )
         assert _wait(lambda: processor.wake_channel_proven and processor.idle_interval_ms == 1000, 30.0), (
             "the listener did not reconnect and prove the channel again"
         )
+    finally:
+        processor.stop()
+
+
+def test_a_proof_that_stops_arriving_ends_the_stretch(
+    stack: Stack, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _postgres_only(stack)
+    from stabilize.queue.postgres_wake import WakeListener
+
+    queue = _notifying_queue(request, wake_notify=True)
+    processor = _idle_processor(queue, [])
+    processor.start()
+    try:
+        assert _wait(lambda: processor.wake_channel_proven and processor.idle_interval_ms == 1000, 10.0)
+        monkeypatch.setattr(WakeListener, "_ping", lambda self: None)
+        assert _wait(lambda: not processor.wake_channel_proven, 8.0), (
+            "no proof arrived for longer than the ping interval plus its grace and the channel still counts as proven"
+        )
+        assert processor.idle_interval_ms == 50
     finally:
         processor.stop()
 

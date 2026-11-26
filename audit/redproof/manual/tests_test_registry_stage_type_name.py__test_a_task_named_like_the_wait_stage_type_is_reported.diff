@@ -1,0 +1,12 @@
+test-id: tests/test_registry_stage_type_name.py::test_a_task_named_like_the_wait_stage_type_is_reported
+--- a/src/stabilize/tasks/registry.py
++++ b/src/stabilize/tasks/registry.py
+@@ -118,7 +118,7 @@
+                 logger.warning("Overwriting existing task registration: %s", name)
+ 
+         self._builtin_names.discard(name)
+-        self._warn_if_stage_type(name)
++        self._builtin_names.discard(name)
+ 
+         self._tasks[name] = task
+ 
