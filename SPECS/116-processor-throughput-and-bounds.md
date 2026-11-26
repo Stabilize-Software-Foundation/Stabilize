@@ -181,7 +181,7 @@ remainder and stay out of scope.
   `test_engine_columns.py` (optional columns). `probe_sigkill_before_ack.py` also kills at
   `queue.settle`.
 
-## Verification status (2026-11-26, CI pipelines 6536, 6559 and 6564)
+## Verification status (2026-11-26, CI pipelines 6536, 6559, 6564 and 6570)
 
 Met, with the measurement:
 
@@ -213,8 +213,22 @@ NOT MET:
 - The plan's row "one workflow on an idle processor, at most a quarter of 0.34.6" held in two runs
   (0.22 and 0.23) and not in a third on a busy runner (0.41).
 
-Open decision for the director: release with E22's second half recorded as not met, or hold for work on
-the cost per message (round trips per message: the handler reads, the tenant arm, the driver).
+Pipeline 6570, on the commit that was merged: 6.7 against 7.4 workflows a second with the pure-Python
+implementation and 14.6 against 21.4 with the C implementation; the idle workflow's median was 0.12 s
+against 0.75 s (0.17).
+
+## Release record
+
+0.35.0 was merged by the director as pull request 2 (merge commit 088e28b) and published to PyPI on
+2026-11-26 at 13:08Z with E22's second half not met. The wheel and the sdist are the files CI built in
+pipeline 6570 from a commit with the merge commit's tree (134dacf). PyPI's sha256 for both matches the
+CI artefacts: wheel f5b6931758e5f33446744303c49095d43a3dce73d68629abe744136766905116, sdist
+4a0f47318bf58604aba085d577c85b93a53da4a37159662ac29df09f4cb1fac1. The package installed from PyPI in an
+empty venv imports as 0.35.0 and its packaged benchmark example exits 0 with the storage lines.
+
+The cost per message (handler reads, the tenant arm, the driver) is ticket #117. The benchmark's
+comparison prints the backlog ratio and the idle-workflow ratio as measured and no longer fails on
+them. Its checks are the counted results, the paced latency and the fleet runs.
 
 ## Invariants
 

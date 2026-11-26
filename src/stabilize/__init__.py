@@ -14,7 +14,7 @@ workflows with full support for:
 
 from __future__ import annotations
 
-__version__ = "0.35.0"
+__version__ = "0.35.1"
 
 # Assertion helpers
 from stabilize.assertions import (

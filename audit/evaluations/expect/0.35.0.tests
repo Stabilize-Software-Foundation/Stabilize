@@ -1,0 +1,5 @@
+tests/http_task/test_http_execute_time_values.py::test_a_header_set_in_execute_is_sent_downstream_of_an_http_stage|a header the task set in execute() was not sent|tests/http_task/test_http_execute_time_values.py::test_the_same_task_sends_its_header_with_no_upstream_stage
+tests/http_task/test_http_execute_time_values.py::test_a_header_added_in_execute_to_declared_headers_is_sent|a header the task added in execute() to the stage's declared headers was not sent
+tests/http_task/test_http_execute_time_values.py::test_a_body_set_in_execute_is_sent_downstream_of_an_http_stage|a body the task set in execute() was not sent
+tests/http_task/test_http_execute_time_values.py::test_the_planner_digests_headers_and_body_and_no_other_key|the planner left no planning digest
+tests/http_task/test_http_execute_time_values.py::test_an_upstream_value_left_as_planned_is_still_not_sent|a body changed after planning was not sent

@@ -72,6 +72,14 @@ by a restart or a loop, the context takes the ancestor's output for a shared key
 says. The planner keeps the stage's declared value under the engine key ``_declared_values``, and the
 request reads it from there.
 
+A task may also set ``headers`` or ``body`` when it runs, in the stage's context or in a copy of the
+stage that it hands to ``HTTPTask.execute``. A subclass that adds an ``Authorization`` header this way
+keeps the key out of the stored stage. Such a value is sent. The planner records a SHA-256 digest of
+``headers`` and ``body`` under the engine key ``_planned_digests`` when an ancestor output them, and a
+value that no longer matches its digest was written after planning. 0.35.0 dropped these values in a
+stage downstream of one that output the same key (#118), and 0.35.1 sends them again. The engine keys
+are the engine's own record. A task does not need to read or write them.
+
 Names that are also stage types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

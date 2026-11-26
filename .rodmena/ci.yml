@@ -79,7 +79,7 @@ jobs:
         run: PATH="$PWD/.venv311/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .venv311/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider -rfE
 
   baseline:
-    name: "Published 0.34.6 from PyPI: existing suite and probes"
+    name: "Published 0.35.0 from PyPI: existing suite and probes"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 50
@@ -92,27 +92,27 @@ jobs:
           major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
           su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
           test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
-      - name: Install stabilize 0.34.6 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.34.6' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml coverage
+      - name: Install stabilize 0.35.0 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.35.0' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml coverage
       - name: Installed package is the published one
-        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.34.6' and 'site-packages' in stabilize.__file__ else 1)"
+        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.35.0' and 'site-packages' in stabilize.__file__ else 1)"
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
-      - name: Existing suite against 0.34.6 (new red tests listed in expect/0.34.6.tests are excluded)
+      - name: Existing suite against 0.35.0 (new red tests listed in expect/0.35.0.tests are excluded)
         run: |
           set -eu
-          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.34.6.tests audit/evaluations/expect/0.34.6.new-api | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
+          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.35.0.tests audit/evaluations/expect/0.35.0.new-api | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
           echo "ignored: $IGN"
           PATH="$PWD/.old/bin:$PATH" STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN --deselect tests/test_engine_context_keys.py::test_every_engine_written_key_is_registered --deselect tests/test_migration_discovery.py::test_get_migrations_finds_them_from_a_source_checkout --deselect tests/test_resilience.py::TestExecuteWithResilience::test_exception_propagates --ignore=tests/test_audit_refuter_regressions.py -q -n 3 -p no:cacheprovider -rfE
-      - name: Existing probes against 0.34.6 (new red probes listed in expect/0.34.6.probes are excluded)
+      - name: Existing probes against 0.35.0 (new red probes listed in expect/0.35.0.probes are excluded)
         run: |
           set -eu
           export PATH="$PWD/.old/bin:$PATH"
           .old/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration"
-          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.34.6.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
+          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.35.0.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
 
   falsify:
-    name: "New probes and tests go red on published 0.34.6 for their stated reason"
+    name: "New probes and tests go red on published 0.35.0 for their stated reason"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 50
@@ -125,11 +125,11 @@ jobs:
           major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
           su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
           test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
-      - name: Install stabilize 0.34.6 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.34.6' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Install stabilize 0.35.0 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.35.0' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
-      - name: Probes and tests listed in expect/0.34.6.* fail on 0.34.6 with their marker, controls green
+      - name: Probes and tests listed in expect/0.35.0.* fail on 0.35.0 with their marker, controls green
         run: |
           set -u
           export PATH="$PWD/.old/bin:$PATH"
@@ -137,12 +137,12 @@ jobs:
           major="$(psql "$DATABASE_URL" -Atc 'SHOW server_version_num' | cut -c1-2)"
           export PROBE_PG_STOP="su postgres -c '/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -m fast -w stop'"
           export PROBE_PG_START="su postgres -c '/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w start'"
-          if grep -q '[^[:space:]]' audit/evaluations/expect/0.34.6.probes; then
-            OLD_VERSION=0.34.6 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
+          if grep -q '[^[:space:]]' audit/evaluations/expect/0.35.0.probes; then
+            OLD_VERSION=0.35.0 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
           else
-            echo "expect/0.34.6.probes lists no probe: this release adds no probe that must fail on 0.34.6"; p=0
+            echo "expect/0.35.0.probes lists no probe: this release adds no probe that must fail on 0.35.0"; p=0
           fi
-          STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 OLD_VERSION=0.34.6 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
+          STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 OLD_VERSION=0.35.0 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
           echo "probe falsification exit=$p test falsification exit=$t"
           [ "$p" -eq 0 ] && [ "$t" -eq 0 ]
 

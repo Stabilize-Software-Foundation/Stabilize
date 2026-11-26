@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_execute_time_values.py::test_a_body_set_in_execute_is_sent_downstream_of_an_http_stage
+--- a/src/stabilize/tasks/http/request.py
++++ b/src/stabilize/tasks/http/request.py
+@@ -31,7 +31,7 @@
+     """
+     declared = context.get(DECLARED_VALUES)
+     if isinstance(declared, dict):
+-        if changed_since_planning(context, key):
++        if False:
+             return context.get(key)
+         if key in declared:
+             return declared[key]

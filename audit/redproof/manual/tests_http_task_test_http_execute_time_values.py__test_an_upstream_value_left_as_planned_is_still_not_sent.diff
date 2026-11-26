@@ -1,0 +1,9 @@
+test-id: tests/http_task/test_http_execute_time_values.py::test_an_upstream_value_left_as_planned_is_still_not_sent
+--- a/src/stabilize/models/stage/planned_digests.py
++++ b/src/stabilize/models/stage/planned_digests.py
+@@ -51,4 +51,4 @@
+     digests = context.get(PLANNED_DIGESTS)
+     if not isinstance(digests, dict) or key not in digests:
+         return False
+-    return bool(digest(context.get(key)) != digests[key])
++    return True

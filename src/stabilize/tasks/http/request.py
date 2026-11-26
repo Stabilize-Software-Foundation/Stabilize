@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request
 
+from stabilize.models.stage.planned_digests import changed_since_planning
 from stabilize.tasks.http.utils import guess_content_type, substitute_placeholders
 
 HYDRATED_KEYS = "_hydrated_keys"
@@ -23,11 +24,15 @@ def own_value(context: dict[str, Any], key: str) -> Any:
     The planner records the value a stage declared for a key an ancestor also outputs. That value
     is returned even after a later plan put the ancestor's output in the context. A value that
     reached the context only from an ancestor is not the stage's request input, and None is
-    returned for it. A context planned before 0.35.0 carries no record, and its value is returned
-    as it stands.
+    returned for it. A value written after planning, in the stored context or in a copy a task
+    passes on, differs from the digest the planner recorded and is returned. A context planned
+    by 0.35.0 carries no digest and is read by the first two rules. A context planned before
+    0.35.0 carries no record, and its value is returned as it stands.
     """
     declared = context.get(DECLARED_VALUES)
     if isinstance(declared, dict):
+        if changed_since_planning(context, key):
+            return context.get(key)
         if key in declared:
             return declared[key]
         if key in (context.get(HYDRATED_KEYS) or ()):

@@ -1,6 +1,47 @@
 # Changelog
 
+## [0.35.1] - 2026-11-26
+
+One fix for a regression in 0.35.0. No schema change is needed, and 0.34.6 can be upgraded to 0.35.1
+directly.
+
+### Fixed
+
+- **A header or body a task sets in `execute()` is sent again (#118).** In 0.35.0, an HTTP stage
+  downstream of a stage that output `headers` or `body` dropped a value its own task wrote after
+  planning. An `HTTPTask` subclass that added an `Authorization` header to a copy of the stage at
+  execute time sent the request without it, where 0.34.6 sent it. Provenance reported it with a
+  reproduction on the day of the release. The planner now records a SHA-256 digest of `headers` and
+  `body` under the engine key `_planned_digests` when an ancestor output them, and `HTTPTask` sends a
+  value that no longer matches its digest. A value left as the planner wrote it is treated as in
+  0.35.0: the stage's declared value is sent, and a value that only an ancestor supplied is not (#106).
+  `tests/http_task/test_http_execute_time_values.py`.
+
+### Changed
+
+- **One more engine context key (#118).** `_planned_digests` is listed in
+  `stabilize.models.stage.engine_keys`. A consumer that builds its exclusion list from that module
+  picks it up.
+
+### Documentation
+
+- **The 0.34 upgrade runbook names a prune step that can be run (#120).** It told every install to
+  run `prune-processed` before `mg-up`. The command of 0.34.0 and later refuses a schema below 0.34,
+  and releases below 0.33.0 have no such command. The runbook now says to prune with an installed
+  0.33.x before installing the new release, and to go straight to `mg-up` from anything older. pdfapi
+  reported it from an upgrade of a 0.21.1 schema.
+
+### Upgrade note
+
+A stage planned by 0.35.0 and run by 0.35.1 carries no digest. It behaves as on 0.35.0 until it is
+planned again. A task that wrote to `_declared_values` to work around the defect keeps working and no
+longer needs to.
+
 ## [0.35.0] - 2026-11-26
+
+**Known defect, fixed in 0.35.1 (#118):** a header or body that a task sets in `execute()` is dropped
+in a stage downstream of one that output `headers` or `body`. Code written for 0.34 that adds a request
+header at execute time loses it on 0.35.0.
 
 No schema change is needed to upgrade. `stabilize mg-up` adds one nullable column,
 `queue_messages.locked_by`, which only a pool with a `worker_id` uses. A 0.34.6 process and a 0.35.0
