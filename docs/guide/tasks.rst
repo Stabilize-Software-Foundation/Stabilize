@@ -92,7 +92,48 @@ puts ``url``, ``headers`` and ``body`` back when the stage is reset. A key whose
 after the failure is left as it is. An operator can correct a body in the stored stage and restart
 the stage with the corrected body. A task class names its own request keys in
 ``request_context_keys``. The default is empty, and a task with no request keys keeps whatever its
-failed result left in the context.
+failed result left in the context, except ``error``. A reset removes ``error`` for every task, and for
+``HTTPTask`` it also removes ``error_code`` and the response keys of the failed attempt (#124). A stage
+that succeeds after a restart then shows no failure in its context.
+
+Failed requests
+~~~~~~~~~~~~~~~
+
+A request that fails ends the task with a result. ``HTTPTask.execute`` does not raise for a refused
+address, a timeout, a connection error, a reply that is not HTTP or a body that ends early. With
+``continue_on_failure`` the result is FAILED_CONTINUE, and without it TERMINAL. The result's context
+holds the text under ``error`` and, from 0.35.2, one of these codes under ``error_code``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - ``error_code``
+     - When
+   * - ``invalid_request``
+     - No ``url``, an unsupported ``method``, an upload file that is missing, or a ``download_to`` path
+       that is refused.
+   * - ``blocked_address``
+     - The SSRF check refused the address, before the request or when the socket connected. The request
+       is not tried again, whatever ``retries`` says.
+   * - ``timeout``
+     - No reply, or no more of the body, within ``timeout`` seconds.
+   * - ``connection_failed``
+     - The connection could not be made or broke, the reply was not HTTP, or the body ended before its
+       ``Content-Length``.
+   * - ``response_too_large``
+     - The body is longer than ``max_response_size``.
+   * - ``http_status``
+     - The status is not 2xx, or not in ``expected_status``. The status is under ``status_code``.
+   * - ``no_response``
+     - The request ended with neither a response nor an error.
+
+The set is ``stabilize.tasks.http.failure.ERROR_CODES``. The texts under ``error`` are as they were in
+0.35.0 and are not a stable interface. Match on the code.
+
+Up to 0.35.1 a timeout while the body was read and a reply that was not HTTP left ``execute`` as an
+exception, and ``continue_on_failure`` did not apply to them. A body shorter than its
+``Content-Length`` was returned as a success (#126).
 
 Names that are also stage types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

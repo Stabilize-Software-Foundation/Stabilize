@@ -30,7 +30,30 @@ context after 0.35.0. No schema change is needed.
   alone. The context of a failed stage reads as before until the reset.
   `tests/http_task/test_http_restart_request.py`.
 
+- **A failure while HTTPTask reads the response is a result (#126).** A timeout while the body was
+  read and a reply that was not HTTP left `HTTPTask.execute` as an exception. `continue_on_failure`
+  did not apply, and the task's own `retries` did not cover a reply that was not HTTP. Both now end
+  the task with a failed result. A body that ends before its `Content-Length` was returned as a
+  success with the bytes that arrived. It is now a failure whose text names both lengths.
+
+- **A connect-time SSRF refusal is not tried again (#125).** The peer check at connect time raises
+  inside urllib, which wraps it, and the retry rule did not recognise the wrapped refusal. With
+  `retries` set the task connected again for each retry. Each attempt was refused, and no request
+  reached a blocked address. The refusal now ends the request at once.
+
+- **A stage that succeeds after a restart shows no failure in its context (#124).** A reset cleared
+  `exception` and left the `error` text of a failed result, and for `HTTPTask` the failed response
+  under `status_code` and the `response_*` names. A reset now removes `error` for every task, and
+  `HTTPTask` lists its response keys in `reset_context_keys`. Reset keys are found for a task named by
+  its class path as well as by its registered name.
+
 ### Added
+
+- **An error code beside HTTPTask's error text (#121).** A failed request writes `error_code` to the
+  result's context beside `error`: `invalid_request`, `blocked_address`, `timeout`,
+  `connection_failed`, `response_too_large`, `http_status` or `no_response`. The set is
+  `stabilize.tasks.http.failure.ERROR_CODES`, and `docs/guide/tasks.rst` says when each is used. The
+  error texts are unchanged. Webmail asked for it.
 
 - **`Task.request_context_keys` (#119).** A task class lists the context keys it builds its request
   from. `HTTPTask` lists `url`, `headers` and `body`. The default is empty, and the context a failed
@@ -51,6 +74,12 @@ its declared values are replaced by an ancestor's output on the next plan, as be
 A workflow that relied on an ancestor's output replacing a declared value on a loop or a restart sees
 the declared value from this release. Leave the key out of the stage's context to take the ancestor's
 output on every plan.
+
+A task that read `error` from its stage's context to learn why its previous run failed no longer finds
+it after a restart or a jump. Keep such state under a key of your own.
+
+Code that called `HTTPTask.execute` and caught `TimeoutError` or `http.client.HTTPException` around
+it now receives a failed result for those cases.
 
 ## [0.35.1] - 2026-11-26
 

@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_request_with_no_url_is_an_invalid_request
+--- a/src/stabilize/tasks/http/task.py
++++ b/src/stabilize/tasks/http/task.py
+@@ -272,7 +272,7 @@
+         # Extract and validate URL
+         url = context.get("url")
+         if not url:
+-            return failure("No 'url' specified in context", INVALID_REQUEST)
++            return failure("No 'url' specified in context", BLOCKED_ADDRESS)
+ 
+         # Substitute placeholders in URL
+         url = substitute_placeholders(url, context, secrets)

@@ -26,7 +26,7 @@ STAGE_RESET_KEYS: tuple[str, ...] = (
     "_on_failure_planned",
 )
 
-TASK_RESET_KEYS: tuple[str, ...] = ("exception", "_paused_at", "_paused_ms", *sorted(SIGNAL_KEYS))
+TASK_RESET_KEYS: tuple[str, ...] = ("exception", "error", "_paused_at", "_paused_ms", *sorted(SIGNAL_KEYS))
 
 
 def reset_keys_for(implementing_class: str, task_registry: TaskRegistry | None) -> tuple[str, ...]:

@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_restarted_stage_that_succeeds_shows_nothing_of_its_failed_attempt[by-name]
+--- a/src/stabilize/handlers/jump_to_stage/reset.py
++++ b/src/stabilize/handlers/jump_to_stage/reset.py
+@@ -26,7 +26,7 @@
+     "_on_failure_planned",
+ )
+ 
+-TASK_RESET_KEYS: tuple[str, ...] = ("exception", "error", "_paused_at", "_paused_ms", *sorted(SIGNAL_KEYS))
++TASK_RESET_KEYS: tuple[str, ...] = ("exception", "_paused_at", "_paused_ms", *sorted(SIGNAL_KEYS))
+ 
+ 
+ def reset_keys_for(implementing_class: str, task_registry: TaskRegistry | None) -> tuple[str, ...]:

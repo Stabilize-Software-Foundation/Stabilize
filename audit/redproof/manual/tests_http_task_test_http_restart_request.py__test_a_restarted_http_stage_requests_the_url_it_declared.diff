@@ -1,12 +1,12 @@
 test-id: tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_requests_the_url_it_declared
 --- a/src/stabilize/tasks/http/task.py
 +++ b/src/stabilize/tasks/http/task.py
-@@ -257,7 +257,7 @@
+@@ -260,7 +260,7 @@
          }
      """
  
 -    request_context_keys: tuple[str, ...] = ("url", "headers", "body")
 +    request_context_keys: tuple[str, ...] = ("headers", "body")
+     reset_context_keys: tuple[str, ...] = RESPONSE_CONTEXT_KEYS
  
      def execute(self, stage: StageExecution) -> TaskResult:
-         """Execute HTTP request."""

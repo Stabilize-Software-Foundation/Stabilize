@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_restarted_stage_that_succeeds_shows_nothing_of_its_failed_attempt[by-class-path]
+--- a/src/stabilize/tasks/registry.py
++++ b/src/stabilize/tasks/registry.py
+@@ -202,7 +202,7 @@
+         from stabilize.tasks.builtins import BUILTIN_ALIASES, BUILTIN_TASKS
+ 
+         simple_name = name.rsplit(".", maxsplit=1)[-1]
+-        for candidate in (name, simple_name, simple_name.lower()):
++        for candidate in (name,):
+             impl = self._tasks.get(self._aliases.get(candidate, candidate))
+             if impl is None:
+                 impl = BUILTIN_TASKS.get(BUILTIN_ALIASES.get(candidate, candidate))

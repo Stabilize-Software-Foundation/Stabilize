@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_the_codes_these_tests_expect_are_the_ones_the_module_lists
+--- a/src/stabilize/tasks/http/failure.py
++++ b/src/stabilize/tasks/http/failure.py
+@@ -17,7 +17,7 @@
+ NO_RESPONSE = "no_response"
+ 
+ ERROR_CODES = frozenset(
+-    {INVALID_REQUEST, BLOCKED_ADDRESS, TIMEOUT, CONNECTION_FAILED, RESPONSE_TOO_LARGE, HTTP_STATUS, NO_RESPONSE}
++    {INVALID_REQUEST, BLOCKED_ADDRESS, TIMEOUT, CONNECTION_FAILED, RESPONSE_TOO_LARGE, HTTP_STATUS}
+ )
+ 
+ 

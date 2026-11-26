@@ -1,0 +1,10 @@
+test-id: tests/http_task/test_http_failures.py::test_a_status_the_stage_does_not_accept_is_http_status
+--- a/src/stabilize/tasks/http/response.py
++++ b/src/stabilize/tasks/http/response.py
+@@ -163,5 +163,5 @@
+         logger.debug("HTTPTask success: %s", status_code)
+         return TaskResult.success(outputs=outputs)
+     return failure(
+-        f"HTTP {status_code}", HTTP_STATUS, continue_on_failure=continue_on_failure, outputs=outputs, context=outputs
++        f"HTTP {status_code}", NO_RESPONSE, continue_on_failure=continue_on_failure, outputs=outputs, context=outputs
+     )

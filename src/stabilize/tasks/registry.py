@@ -201,14 +201,15 @@ class TaskRegistry:
         """The context keys a reset clears for the task registered as *name*; empty when unknown."""
         from stabilize.tasks.builtins import BUILTIN_ALIASES, BUILTIN_TASKS
 
-        resolved = self._aliases.get(name, name)
-        impl = self._tasks.get(resolved)
-        if impl is None:
-            impl = BUILTIN_TASKS.get(BUILTIN_ALIASES.get(name, name))
-        if isinstance(impl, type) and issubclass(impl, Task):
-            return tuple(impl.reset_context_keys)
-        if isinstance(impl, Task):
-            return tuple(type(impl).reset_context_keys)
+        simple_name = name.rsplit(".", maxsplit=1)[-1]
+        for candidate in (name, simple_name, simple_name.lower()):
+            impl = self._tasks.get(self._aliases.get(candidate, candidate))
+            if impl is None:
+                impl = BUILTIN_TASKS.get(BUILTIN_ALIASES.get(candidate, candidate))
+            if isinstance(impl, type) and issubclass(impl, Task):
+                return tuple(impl.reset_context_keys)
+            if isinstance(impl, Task):
+                return tuple(type(impl).reset_context_keys)
         return ()
 
     def get(self, name: str) -> Task:

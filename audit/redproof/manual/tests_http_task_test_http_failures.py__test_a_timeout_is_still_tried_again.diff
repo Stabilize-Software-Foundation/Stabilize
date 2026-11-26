@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_timeout_is_still_tried_again
+--- a/src/stabilize/tasks/http/task.py
++++ b/src/stabilize/tasks/http/task.py
+@@ -362,7 +362,7 @@
+                 return True
+             if isinstance(e, HTTPError) and e.code in retry_on_status:
+                 return True
+-            return bool(isinstance(e, (URLError, TimeoutError, OSError, HTTPException)))
++            return False
+ 
+         http_retry_policy = RetryWithBackoffPolicy(
+             max_retries=retries,
