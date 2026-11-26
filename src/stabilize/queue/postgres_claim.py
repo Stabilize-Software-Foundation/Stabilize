@@ -190,15 +190,13 @@ class PostgresClaimMixin:
             self.announce_ready()
         return released
 
-    def require_locked_by(self) -> None:
+    def require_locked_by(self, conn: Any) -> None:
         """Raise EngineSchemaError unless the queue table has the column a worker id is recorded in."""
         from stabilize.persistence.tenancy import EngineSchemaError
 
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(HAS_LOCKED_BY_SQL, {"schema": self.schema, "table": self.table_name})
-                found = cur.fetchone() is not None
-            conn.commit()
+        with conn.cursor() as cur:
+            cur.execute(HAS_LOCKED_BY_SQL, {"schema": self.schema, "table": self.table_name})
+            found = cur.fetchone() is not None
         if not found:
             raise EngineSchemaError(
                 f"{self.table_name} lacks column locked_by, which a worker_id needs; run stabilize mg-up, or for a "

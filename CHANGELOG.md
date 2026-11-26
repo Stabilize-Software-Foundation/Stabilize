@@ -9,8 +9,8 @@ process can share a queue. See `docs/guide/processor.rst` for the settings named
 ### Changed
 
 - **The processor takes work when it is ready (#116, reported by Webmail).** The poll loop slept one
-  `poll_frequency_ms` whenever the worker pool was full or the queue looked empty, so throughput followed
-  the poll interval: 4 workers at 250 ms handled about 16 messages a second. It now polls when a handler
+  `poll_frequency_ms` whenever the worker pool was full or the queue looked empty. Throughput therefore
+  followed the poll interval, and 4 workers at 250 ms handled about 16 messages a second. It now polls when a handler
   finishes while the pool was full, and when a transaction in the same process that pushed a message
   commits. `poll_frequency_ms` remains the longest it waits. One poll claims a message for each free
   worker (`Queue.poll_many`), and the processor holds no lock while it polls.
@@ -24,8 +24,8 @@ process can share a queue. See `docs/guide/processor.rst` for the settings named
   `tests/test_query_budget.py`.
 
 - **A chain of messages runs on one worker (#116).** When a delivery commits one undelayed successor,
-  the row is inserted already leased to that worker and the same thread handles it next. A one-stage
-  workflow is polled once, where each of its seven messages used to wait for a poll.
+  the row is inserted already leased to that worker and the same thread handles it next. Each of the
+  seven messages of a one-stage workflow used to wait for a poll, and now the workflow is polled once.
   `QueueProcessorConfig.continuation_hops` (16) bounds a chain, and `0` restores a poll per message.
   `process_one()` and `process_all()` are unchanged. `tests/test_continuation.py`.
 
@@ -71,15 +71,15 @@ process can share a queue. See `docs/guide/processor.rst` for the settings named
   `tests/test_recovery_dead_letter_start.py`.
 
 - **A task is not run again before the `scheduled_time` it returned (#116, reported by Webmail).**
-  `TaskResult.running(scheduled_time=...)` was re-queued with the task's backoff alone, so a task asking
-  for 3 s was run again after 1 s. The delay is now the later of the two.
+  `TaskResult.running(scheduled_time=...)` was re-queued with the task's backoff alone. A task asking for
+  3 s was run again after 1 s. The delay is now the later of the two.
   `tests/test_running_scheduled_time.py`.
 
 - **An HTTP stage does not send an upstream response's headers or body (#106, reported by Provenance).**
   A stage's context is filled with its ancestors' outputs, and `headers` and `body` are both a response
-  output and a request input. The request now takes them only when the stage declared them. A stage that
-  declared a key an ancestor also outputs keeps its own value when it is planned again, where a restart
-  or a loop used to replace it with the ancestor's. `tests/http_task/test_http_upstream_keys.py`.
+  output and a request input. The request now takes them only when the stage declared them. A restart or a
+  loop used to replace a value the stage declared with an ancestor's output of the same name. The stage
+  now keeps its own value when it is planned again. `tests/http_task/test_http_upstream_keys.py`.
 
 - **`examples/benchmark-overhead.py` reports storage cost apart from the engine's (#113, reported by
   Webmail).** It prints the SQLite journal mode and synchronous setting, the measured cost of one commit

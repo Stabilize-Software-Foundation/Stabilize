@@ -1,8 +1,8 @@
 test-id: tests/test_worker_identity.py::test_a_check_that_cannot_see_its_own_session_releases_nothing
 --- a/src/stabilize/queue/processor/worker_identity.py
 +++ b/src/stabilize/queue/processor/worker_identity.py
-@@ -42,7 +42,7 @@
-         queue.require_locked_by()
+@@ -41,7 +41,7 @@
+     try:
          with queue._borrow() as conn:
              tags = [tag for tag in (parse_worker_tag(name) for name in engine_sessions(conn)) if tag is not None]
 -            if (worker_id, INCARNATION) not in tags:

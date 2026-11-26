@@ -39,7 +39,6 @@ def reclaim(queue: Any) -> ReclaimResult:
     if not isinstance(worker_id, str) or not worker_id:
         return ReclaimResult()
     try:
-        queue.require_locked_by()
         with queue._borrow() as conn:
             tags = [tag for tag in (parse_worker_tag(name) for name in engine_sessions(conn)) if tag is not None]
             if (worker_id, INCARNATION) not in tags:

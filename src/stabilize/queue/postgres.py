@@ -144,6 +144,8 @@ class PostgresQueue(PostgresClaimMixin, PostgresWakeMixin, PostgresQueueLookupsM
             check_postgres_tables(
                 conn, self.schema, [self.table_name, f"{self.table_name}_dlq"], lambda: self._mode.last or "single"
             )
+            if self.worker_id:
+                self.require_locked_by(conn)
         except EngineSchemaError as exc:
             self._schema_state = exc
             raise
