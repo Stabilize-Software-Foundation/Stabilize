@@ -67,7 +67,10 @@ Until 2.0.0 it also writes the same four values as ``status_code``, ``headers``,
 filled with its ancestors' outputs before it runs (see :doc:`data_flow`), and up to 0.34.6 an HTTP stage
 after another HTTP stage sent the upstream response's headers and body as its own request. From 0.35.0
 the task sends ``headers`` and ``body`` only when the stage declared them. A value that reached the
-context only from an upstream stage is left out of the request (#106).
+context only from an upstream stage is left out of the request (#106). When a stage is planned again
+by a restart or a loop, the context takes the ancestor's output for a shared key, as the data-flow rule
+says. The planner keeps the stage's declared value under the engine key ``_declared_values``, and the
+request reads it from there.
 
 Names that are also stage types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

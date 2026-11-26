@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_upstream_keys.py::test_a_stage_planned_again_still_sends_the_headers_it_declared
+--- a/src/stabilize/handlers/start_stage/planner.py
++++ b/src/stabilize/handlers/start_stage/planner.py
+@@ -63,7 +63,7 @@
+                 # ancestor is authoritative; the copy is stale.
+                 continue
+             if key in ancestor_keys:
+-                declared[key] = value
++                declared.pop(key, None)
+             if key in merged and isinstance(merged[key], list) and isinstance(value, list):
+                 # Concatenate lists, avoiding duplicates
+                 existing = merged[key]

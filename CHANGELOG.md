@@ -38,7 +38,7 @@ process can share a queue. See `docs/guide/processor.rst` for the settings named
 - **HTTPTask names its response outputs (#106, reported by Provenance).** The task writes
   `response_status`, `response_headers`, `response_body` and `response_body_json`. It keeps writing
   `status_code`, `headers`, `body` and `body_json` until 2.0.0. Stage contexts gain the engine key
-  `_declared_keys`, listed in `stabilize.models.stage.engine_keys`.
+  `_declared_values`, listed in `stabilize.models.stage.engine_keys`.
 
 ### Added
 
@@ -77,9 +77,11 @@ process can share a queue. See `docs/guide/processor.rst` for the settings named
 
 - **An HTTP stage does not send an upstream response's headers or body (#106, reported by Provenance).**
   A stage's context is filled with its ancestors' outputs, and `headers` and `body` are both a response
-  output and a request input. The request now takes them only when the stage declared them. A restart or a
-  loop used to replace a value the stage declared with an ancestor's output of the same name. The stage
-  now keeps its own value when it is planned again. `tests/http_task/test_http_upstream_keys.py`.
+  output and a request input. The request now takes them only when the stage declared them. The planner
+  records the value a stage declared for a key an ancestor also outputs, and the request uses that
+  record. A stage that is restarted or looped therefore still sends its own headers. The stage context
+  follows the data-flow rule as before: on re-entry an ancestor's output replaces the value.
+  `tests/http_task/test_http_upstream_keys.py`.
 
 - **`examples/benchmark-overhead.py` reports storage cost apart from the engine's (#113, reported by
   Webmail).** It prints the SQLite journal mode and synchronous setting, the measured cost of one commit

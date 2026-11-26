@@ -13,22 +13,24 @@ from urllib.request import Request
 
 from stabilize.tasks.http.utils import guess_content_type, substitute_placeholders
 
-
 HYDRATED_KEYS = "_hydrated_keys"
-DECLARED_KEYS = "_declared_keys"
+DECLARED_VALUES = "_declared_values"
 
 
 def own_value(context: dict[str, Any], key: str) -> Any:
     """The stage's own value for a request key.
 
-    A value that reached the context only from an upstream stage's outputs is not the
-    stage's request input, and None is returned for it. A context planned before 0.35.0
-    records no declared keys, and its value is returned as it stands.
+    The planner records the value a stage declared for a key an ancestor also outputs. That value
+    is returned even after a later plan put the ancestor's output in the context. A value that
+    reached the context only from an ancestor is not the stage's request input, and None is
+    returned for it. A context planned before 0.35.0 carries no record, and its value is returned
+    as it stands.
     """
-    if DECLARED_KEYS in context:
-        hydrated = context.get(HYDRATED_KEYS) or ()
-        declared = context.get(DECLARED_KEYS) or ()
-        if key in hydrated and key not in declared:
+    declared = context.get(DECLARED_VALUES)
+    if isinstance(declared, dict):
+        if key in declared:
+            return declared[key]
+        if key in (context.get(HYDRATED_KEYS) or ()):
             return None
     return context.get(key)
 
@@ -94,7 +96,7 @@ def build_request(
 
     elif own_value(context, "body") is not None:
         # Raw body
-        body = context["body"]
+        body = own_value(context, "body")
         if isinstance(body, str):
             body = substitute_placeholders(body, context, secrets)
             body_bytes = body.encode("utf-8")

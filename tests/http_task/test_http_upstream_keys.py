@@ -95,7 +95,9 @@ def test_the_response_is_written_under_its_own_names_and_the_old_ones(stack: Sta
     assert outputs["status_code"] == 200 and outputs["body_json"] == outputs["response_body_json"]
 
 
-def test_a_stage_planned_again_keeps_the_value_it_declared_over_an_upstream_one(stack: Stack) -> None:
+def test_a_stage_planned_again_still_sends_the_headers_it_declared(stack: Stack) -> None:
+    from stabilize.tasks.http.request import build_request
+
     upstream = StageExecution(ref_id="up", type="work", name="Up")
     upstream.status = WorkflowStatus.SUCCEEDED
     upstream.outputs = {"headers": {"Server": "upstream"}, "only_upstream": 1}
@@ -113,17 +115,21 @@ def test_a_stage_planned_again_keeps_the_value_it_declared_over_an_upstream_one(
     loaded = stack.store.retrieve_stage(stage.id)
 
     handler._plan_stage(loaded)
-    assert loaded.context["headers"] == {"X-Own": "declared"}
-    assert loaded.context["only_upstream"] == 1
+    first, _ = build_request("GET", "http://example.invalid/", loaded.context, [])
+    assert first.get_header("X-own") == "declared"
 
     handler._plan_stage(loaded)
-    assert loaded.context["headers"] == {"X-Own": "declared"}, (
-        f"planning the stage again replaced the value it declared with the upstream one: {loaded.context['headers']}"
+    assert loaded.context["headers"] == {"Server": "upstream"}, (
+        "on a second plan the ancestor's output is the context value, which loops rely on"
     )
     assert loaded.context["only_upstream"] == 1
+    again, _ = build_request("GET", "http://example.invalid/", loaded.context, [])
+    assert again.get_header("X-own") == "declared" and again.get_header("Server") is None, (
+        f"planned again, the stage sent the upstream headers in place of its own: {again.header_items()}"
+    )
 
 
-def test_a_context_planned_before_the_declared_keys_existed_is_sent_as_it_stands() -> None:
+def test_a_context_planned_before_the_declared_values_existed_is_sent_as_it_stands() -> None:
     from stabilize.tasks.http.request import build_request
 
     old_context = {"headers": {"X-Own": "declared"}, "_hydrated_keys": ["headers", "body"], "body": "kept"}
@@ -131,7 +137,12 @@ def test_a_context_planned_before_the_declared_keys_existed_is_sent_as_it_stands
     assert request.get_header("X-own") == "declared"
     assert body == b"kept"
 
-    new_context = {**old_context, "_declared_keys": ["headers"]}
+    new_context = {
+        "headers": {"Server": "upstream"},
+        "body": "upstream body",
+        "_hydrated_keys": ["headers", "body"],
+        "_declared_values": {"headers": {"X-Own": "declared"}},
+    }
     request, body = build_request("POST", "http://example.invalid/", new_context, [])
-    assert request.get_header("X-own") == "declared"
+    assert request.get_header("X-own") == "declared" and request.get_header("Server") is None
     assert body is None, "a body that only arrived from an upstream stage was sent"

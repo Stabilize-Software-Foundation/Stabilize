@@ -147,6 +147,16 @@ def create_queue(
         )
     from stabilize.queue import PostgresQueue
 
+    if store_retry_budget is None:
+        return PostgresQueue(
+            connection_string,
+            table_name=table_name,
+            lock_duration=lock_duration,
+            max_attempts=max_attempts,
+            tenant=tenant,
+            schema=schema,
+            options=options,
+        )
     return PostgresQueue(
         connection_string,
         table_name=table_name,
@@ -155,5 +165,5 @@ def create_queue(
         tenant=tenant,
         schema=schema,
         options=options,
-        **budget,
+        store_retry_budget=store_retry_budget,
     )
