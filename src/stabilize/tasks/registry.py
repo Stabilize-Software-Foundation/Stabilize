@@ -118,6 +118,7 @@ class TaskRegistry:
                 logger.warning("Overwriting existing task registration: %s", name)
 
         self._builtin_names.discard(name)
+        self._warn_if_stage_type(name)
 
         self._tasks[name] = task
 
@@ -176,6 +177,25 @@ class TaskRegistry:
             return func
 
         return decorator
+
+    @staticmethod
+    def _warn_if_stage_type(name: str) -> None:
+        from stabilize.stages.builder import NoOpStageBuilder, get_default_factory
+
+        factory = get_default_factory()
+        if not factory.has(name):
+            return
+        builder = factory.get(name)
+        if isinstance(builder, NoOpStageBuilder):
+            return
+        logger.warning(
+            "A stage of type %r that lists no tasks is planned by %s, which supplies its own task. The task "
+            "registered as %r runs only where a TaskExecution names it, so give your stage and task a name of "
+            "their own.",
+            name,
+            type(builder).__name__,
+            name,
+        )
 
     def reset_context_keys_for(self, name: str) -> tuple[str, ...]:
         """The context keys a reset clears for the task registered as *name*; empty when unknown."""

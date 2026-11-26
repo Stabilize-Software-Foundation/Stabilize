@@ -69,6 +69,15 @@ after another HTTP stage sent the upstream response's headers and body as its ow
 the task sends ``headers`` and ``body`` only when the stage declared them. A value that reached the
 context only from an upstream stage is left out of the request (#106).
 
+Names that are also stage types
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``wait`` is a built-in stage type. A stage of type ``wait`` that lists no tasks is planned by the
+built-in ``WaitStageBuilder``, which gives it a ``WaitTask``. A task you register under the name ``wait``
+is not called for such a stage, and from 0.35.0 the registry logs a warning when you register one. Give
+your own stage types and tasks a prefix, for example ``rules.wait``, and register with ``strict=True`` to
+have a clash with an existing task name raise.
+
 DockerTask
 ~~~~~~~~~~
 
