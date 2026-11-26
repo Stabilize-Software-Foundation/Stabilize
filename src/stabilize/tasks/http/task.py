@@ -205,10 +205,13 @@ class HTTPTask(Task):
             secrets (list[str]): Context keys to mask in logs
 
     Outputs:
-        status_code (int): HTTP response status
-        headers (dict): Response headers
-        body (str): Response body (or file path if download_to)
-        body_json (dict|list|None): Parsed JSON (if parse_json=True and valid)
+        response_status (int): HTTP response status
+        response_headers (dict): Response headers
+        response_body (str): Response body (or file path if download_to)
+        response_body_json (dict|list|None): Parsed JSON (if parse_json=True and valid)
+        status_code, headers, body, body_json: the same four values under their names
+            before 0.35.0, written until 2.0.0. A downstream stage does not send
+            ``headers`` or ``body`` it only received this way; it sends the ones it declares.
         elapsed_ms (int): Request duration in milliseconds
         url (str): Final URL after redirects
         content_type (str): Response Content-Type header

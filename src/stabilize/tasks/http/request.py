@@ -14,6 +14,25 @@ from urllib.request import Request
 from stabilize.tasks.http.utils import guess_content_type, substitute_placeholders
 
 
+HYDRATED_KEYS = "_hydrated_keys"
+DECLARED_KEYS = "_declared_keys"
+
+
+def own_value(context: dict[str, Any], key: str) -> Any:
+    """The stage's own value for a request key.
+
+    A value that reached the context only from an upstream stage's outputs is not the
+    stage's request input, and None is returned for it. A context planned before 0.35.0
+    records no declared keys, and its value is returned as it stands.
+    """
+    if DECLARED_KEYS in context:
+        hydrated = context.get(HYDRATED_KEYS) or ()
+        declared = context.get(DECLARED_KEYS) or ()
+        if key in hydrated and key not in declared:
+            return None
+    return context.get(key)
+
+
 def build_request(
     method: str,
     url: str,
@@ -39,7 +58,7 @@ def build_request(
     body_bytes: bytes | None = None
 
     # Custom headers
-    custom_headers = context.get("headers", {})
+    custom_headers = own_value(context, "headers") or {}
     for key, value in custom_headers.items():
         headers[key] = substitute_placeholders(str(value), context, secrets)
 
@@ -73,7 +92,7 @@ def build_request(
         body_bytes = urlencode(form_data).encode("utf-8")
         headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
 
-    elif context.get("body") is not None:
+    elif own_value(context, "body") is not None:
         # Raw body
         body = context["body"]
         if isinstance(body, str):

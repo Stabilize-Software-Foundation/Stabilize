@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
 
 HYDRATED_KEYS = "_hydrated_keys"
+DECLARED_KEYS = "_declared_keys"
 
 
 class StartStagePlannerMixin:
@@ -46,20 +47,24 @@ class StartStagePlannerMixin:
 
         ancestor_keys = set(ancestor_outputs)
         previously_hydrated = set(stage.context.get(HYDRATED_KEYS) or ())
+        previously_declared = set(stage.context.get(DECLARED_KEYS) or ())
+        declared: set[str] = set()
 
         merged = ancestor_outputs
         for key, value in stage.context.items():
-            if key == HYDRATED_KEYS:
+            if key in (HYDRATED_KEYS, DECLARED_KEYS):
                 continue
             if key in reducers:
                 # A reducer produced the authoritative value for this key;
                 # do not let the join stage's own context override it.
                 continue
-            if key in previously_hydrated and key in ancestor_keys:
+            if key in previously_hydrated and key in ancestor_keys and key not in previously_declared:
                 # This value was copied from an ancestor on an earlier plan of
                 # this stage. On a re-entry (jump, restart, loop-back) the
                 # ancestor is authoritative; the copy is stale.
                 continue
+            if key in ancestor_keys:
+                declared.add(key)
             if key in merged and isinstance(merged[key], list) and isinstance(value, list):
                 # Concatenate lists, avoiding duplicates
                 existing = merged[key]
@@ -71,6 +76,7 @@ class StartStagePlannerMixin:
 
         if ancestor_keys:
             merged[HYDRATED_KEYS] = sorted(ancestor_keys)
+            merged[DECLARED_KEYS] = sorted(declared)
 
         stage.context = merged
 
