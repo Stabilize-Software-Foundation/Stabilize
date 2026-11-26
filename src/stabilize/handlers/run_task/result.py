@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -98,6 +99,9 @@ def _handle_running(
 ) -> None:
     """Handle RUNNING status - task needs to be re-executed."""
     delay = get_backoff_fn(stage, task_model, message, 1)
+    if isinstance(stage.scheduled_time, int) and not isinstance(stage.scheduled_time, bool):
+        until_scheduled = timedelta(milliseconds=stage.scheduled_time - int(time.time() * 1000))
+        delay = max(delay, until_scheduled)
 
     txn_helper.execute_atomic(
         stage=stage,

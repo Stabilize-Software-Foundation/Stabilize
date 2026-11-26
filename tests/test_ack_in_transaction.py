@@ -1,4 +1,4 @@
-"""The transaction that marks a message processed removes its queue row, and a first delivery is not looked up (#116)."""
+"""The transaction that marks a message removes its queue row, and a first delivery is not looked up (#116)."""
 
 from __future__ import annotations
 

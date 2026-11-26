@@ -142,7 +142,7 @@ def test_a_connection_that_holds_the_configured_timeout_is_not_reported(
 def test_a_lock_timeout_error_is_redelivered_on_the_store_budget() -> None:
     from stabilize.errors.store_errors import is_store_unavailable
 
-    class LockNotAvailable(Exception):
+    class LockNotAvailableError(Exception):
         sqlstate = "55P03"
 
-    assert is_store_unavailable(LockNotAvailable("canceling statement due to lock timeout"))
+    assert is_store_unavailable(LockNotAvailableError("canceling statement due to lock timeout"))

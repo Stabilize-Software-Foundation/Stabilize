@@ -1,4 +1,4 @@
-"""A processor with a worker id releases its predecessor's leases at start, and only when no other holder is live (#116)."""
+"""A processor with a worker id releases its predecessor's leases at start, unless another holder is live (#116)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from datetime import timedelta
-from typing import Any
 
 import pytest
 
@@ -55,7 +54,9 @@ def queues(postgres_url: str) -> Iterator[Callable[..., PostgresQueue]]:
 
 def _processor(queue: PostgresQueue, handled: list[tuple[str, int]]) -> QueueProcessor:
     processor = QueueProcessor(queue, config=QueueProcessorConfig(enable_deduplication=False, poll_frequency_ms=20))
-    processor.register_handler_func(StartWorkflow, lambda message: handled.append((message.execution_id, message.attempts)))
+    processor.register_handler_func(
+        StartWorkflow, lambda message: handled.append((message.execution_id, message.attempts))
+    )
     return processor
 
 

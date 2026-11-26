@@ -92,7 +92,9 @@ def test_the_counter_sees_a_deliberate_statement(postgres_url: str, monkeypatch:
 
 def test_one_stage_stays_within_budget(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     issued = _statements_for(postgres_url, 1, monkeypatch)
-    assert issued <= ONE_STAGE_BUDGET, f"one no-op stage issued {issued} statements, over the budget of {ONE_STAGE_BUDGET}"
+    assert issued <= ONE_STAGE_BUDGET, (
+        f"one no-op stage issued {issued} statements, over the budget of {ONE_STAGE_BUDGET}"
+    )
 
 
 def test_each_extra_stage_stays_within_budget(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
