@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.graph import StageGraphBuilder
+from stabilize.models.stage.planned_digests import PLANNED_DIGESTS, planned_digests
 from stabilize.stages.builder import (
     get_default_factory,
     report_empty_unregistered_stage,
@@ -51,7 +52,7 @@ class StartStagePlannerMixin:
 
         merged = ancestor_outputs
         for key, value in stage.context.items():
-            if key in (HYDRATED_KEYS, DECLARED_VALUES):
+            if key in (HYDRATED_KEYS, DECLARED_VALUES, PLANNED_DIGESTS):
                 continue
             if key in reducers:
                 # A reducer produced the authoritative value for this key;
@@ -76,6 +77,7 @@ class StartStagePlannerMixin:
         if ancestor_keys:
             merged[HYDRATED_KEYS] = sorted(ancestor_keys)
             merged[DECLARED_VALUES] = declared
+            merged[PLANNED_DIGESTS] = planned_digests(merged, ancestor_keys)
 
         stage.context = merged
 

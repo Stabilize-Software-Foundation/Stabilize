@@ -187,3 +187,26 @@ def test_an_upstream_value_left_as_planned_is_still_not_sent(stack: Stack) -> No
     changed = {**reloaded.context, "body": "set after planning"}
     _, sent = build_request("POST", "http://example.invalid/", changed, [])
     assert sent == b"set after planning", f"a body changed after planning was not sent: {sent!r}"
+
+
+def test_a_failed_response_left_in_the_context_is_not_sent_when_the_stage_is_planned_again(stack: Stack) -> None:
+    from stabilize.tasks.http.request import build_request
+
+    upstream = StageExecution(ref_id="up", type="work", name="Up")
+    upstream.status = WorkflowStatus.SUCCEEDED
+    upstream.outputs = {"headers": {"Server": "upstream"}, "body": "upstream body"}
+    stage = StageExecution(ref_id="s1", type="work", name="Work", requisite_stage_ref_ids={"up"})
+    workflow = Workflow.create(application="http", name="failed-then-planned", stages=[upstream, stage])
+    workflow.status = WorkflowStatus.RUNNING
+    stack.store.store(workflow)
+    handler = StartStageHandler(stack.queue, stack.store, event_recorder=stack.recorder)
+    loaded = stack.store.retrieve_stage(stage.id)
+    handler._plan_stage(loaded)
+
+    loaded.context.update({"headers": {"Server": "failed response"}, "body": "failed response body"})
+    handler._plan_stage(loaded)
+
+    request, body = build_request("POST", "http://example.invalid/", loaded.context, [])
+    assert request.get_header("Server") is None and body is None, (
+        f"the stage's own failed response was sent as its next request: {request.header_items()} {body!r}"
+    )

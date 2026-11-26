@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_execute_time_values.py::test_the_same_task_sends_its_header_with_no_upstream_stage
+--- a/src/stabilize/tasks/http/request.py
++++ b/src/stabilize/tasks/http/request.py
+@@ -65,7 +65,7 @@
+     body_bytes: bytes | None = None
+ 
+     # Custom headers
+-    custom_headers = own_value(context, "headers") or {}
++    custom_headers = {}
+     for key, value in custom_headers.items():
+         headers[key] = substitute_placeholders(str(value), context, secrets)
+ 

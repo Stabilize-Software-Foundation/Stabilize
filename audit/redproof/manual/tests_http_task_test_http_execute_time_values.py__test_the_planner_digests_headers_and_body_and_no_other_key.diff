@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_execute_time_values.py::test_the_planner_digests_headers_and_body_and_no_other_key
+--- a/src/stabilize/handlers/start_stage/planner.py
++++ b/src/stabilize/handlers/start_stage/planner.py
+@@ -77,7 +77,7 @@
+         if ancestor_keys:
+             merged[HYDRATED_KEYS] = sorted(ancestor_keys)
+             merged[DECLARED_VALUES] = declared
+-            merged[PLANNED_DIGESTS] = planned_digests(merged, ancestor_keys)
++            pass
+ 
+         stage.context = merged
+ 

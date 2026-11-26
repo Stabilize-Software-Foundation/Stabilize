@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_upstream_keys.py::test_a_downstream_request_carries_none_of_the_upstream_response
 --- a/src/stabilize/tasks/http/request.py
 +++ b/src/stabilize/tasks/http/request.py
-@@ -31,7 +31,7 @@
+@@ -36,7 +36,7 @@
          if key in declared:
              return declared[key]
          if key in (context.get(HYDRATED_KEYS) or ()):
