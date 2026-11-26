@@ -30,6 +30,7 @@ from urllib.request import BaseHandler, HTTPRedirectHandler, HTTPSHandler, build
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
+from stabilize.models.stage.planned_digests import declared_or_current
 from stabilize.redaction import redact_userinfo
 from stabilize.tasks.http.constants import (
     DEFAULT_RETRY_ON_STATUS,
@@ -270,7 +271,7 @@ class HTTPTask(Task):
         secrets = context.get("secrets", [])
 
         # Extract and validate URL
-        url = context.get("url")
+        url = declared_or_current(context, "url")
         if not url:
             return failure("No 'url' specified in context", INVALID_REQUEST)
 

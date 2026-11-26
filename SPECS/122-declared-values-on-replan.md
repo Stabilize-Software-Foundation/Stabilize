@@ -1,61 +1,75 @@
-# 122: a stage planned again keeps the values it declared
+# 122: a restarted HTTP or SSH stage uses the url, host and user it declared
 
 Ticket #122. Found by reading the planner on 2026-11-26, in the audit of the HTTP task and the stage
-context that followed #118 and #119. No consumer reported it. The same code is in 0.34.6 (since #27).
+context that followed #118 and #119. Reproduced on the published 0.35.0 wheel (pipeline 6658, job
+31790). No consumer reported it. The same code is in 0.34.6 (since #27).
 
 ## EARS spec
 
-- E1. When a stage is planned again after a restart, a jump or a loop, the planner shall keep in the
-  stage's context the value the stage declared for a key an ancestor also outputs, as on the first plan.
-- E2. When a stage is planned again, the planner shall replace a value it copied from an ancestor on an
-  earlier plan with the ancestor's current output (#27, unchanged).
-- E3. When a jump sets a key in `jump_context`, the planner shall treat that value as the stage's own
-  (unchanged).
-- E4. If a stage's context carries `_hydrated_keys` and no `_declared_values` (planned by 0.34.6 or
-  earlier), then the planner shall treat every hydrated key as a copy, as those releases did.
-- E5. While a list is declared for a key an ancestor also outputs as a list, the planner shall merge
-  the declared list into the ancestor's on every plan, as on the first plan.
+- E1. When an HTTP stage that declared `url` is planned again and an ancestor outputs `url`, `HTTPTask`
+  shall request the declared URL.
+- E2. When an SSH stage that declared `host` or `user` is planned again and an ancestor outputs that
+  key, `SSHTask` shall connect to the declared host as the declared user.
+- E3. While a stage declares no `url`, `HTTPTask` shall request the `url` an ancestor outputs, on the
+  first plan and on every later one.
+- E4. When a task changes one of these keys after planning, in the stored context or in a copy of the
+  stage, the task shall use the changed value (#118).
+- E5. The planner shall be unchanged: on a later plan an ancestor's output replaces the stage's value
+  for a shared key, which loop variables rely on.
+- E6. If a stage's context carries no planning digest for the key (planned by 0.35.1 or earlier), then
+  the task shall read the key from the context, as those releases did.
 
-No latency threshold applies. The change adds no statement and no digest.
+The planner computes at most 5 SHA-256 digests per stage plan (`url`, `headers`, `body`, `host`,
+`user`), each only when an ancestor outputs the key.
+
+## First fix, withdrawn
+
+Commit fc5e186 changed the planner to keep every declared value on a later plan. Pipeline 6658 failed
+`tests/test_structured_loops.py::test_nested_loops_run_the_inner_body_on_every_outer_pass` on both
+backends and both Python versions (4 failed, 3195 passed on 3.14). A loop declares its variables with
+an initial value and takes the ancestor's output from the second pass. The planner rule is by design
+for them, and my reading that it was a planner defect was wrong. The planner change was reverted.
 
 ## Cause
 
-`handlers/start_stage/planner.py` writes `_hydrated_keys` with every ancestor key, the ones where the
-stage's own value won included. On the next plan a previously hydrated key that an ancestor still
-outputs was skipped as a stale copy, and the ancestor's output replaced the declared value.
-`docs/guide/data_flow.rst` says the opposite: "Keys the caller set directly on the stage still take
-precedence." Every `HTTPTask` outputs `url`, and `HTTPTask` reads `url` straight from the context.
+On a later plan the planner replaces the stage's value for a key an ancestor also outputs. Every
+`HTTPTask` outputs `url`, and `SSHTask` outputs `host` and `user`. `HTTPTask` read `url` and `SSHTask`
+read `host` and `user` straight from the context. 0.35.0 gave `headers` and `body` a declared record
+(#106) and left these three out.
 
 ## Technical problem
 
-Telling, on a later plan, a value the stage declared from a value the planner copied.
+Telling a request key the stage declared from one an ancestor's output replaced on a later plan,
+inside the task, without changing what the planner puts in the context.
 
 ## Solution domain
 
-Provenance of a context value, recorded by the planner. `_declared_values` (0.35.0, #106) already holds
-the stage's own value for every key an ancestor also outputs.
+The planner's own record: `_declared_values` (0.35.0) holds the stage's value for a shared key and
+`_planned_digests` (0.35.1) tells whether the context value changed after planning.
 
 ## Alternatives
 
-- On a later plan take the stage's value from `_declared_values` for a hydrated key that is in it, and
-  drop only the keys that are not [CHOSEN]. No new engine key, and E4 falls out of the missing record.
-- List only copied keys in `_hydrated_keys` [REJECTED: `own_value` in 0.35.x reads `_hydrated_keys` to
-  decide that an undeclared header is not the stage's, and a mixed fleet would read the two meanings].
-- Make `HTTPTask` read `url` through `own_value` [REJECTED: fixes one key of one task; E1 is a planner
-  rule for every task].
+- The task reads the key through `declared_or_current`: the declared value when the context is as the
+  planner left it, the context value otherwise [CHOSEN]. One function, three call sites.
+- Keep every declared value in the planner [REJECTED: breaks loop variables, shown by pipeline 6658].
+- Stop `HTTPTask` and `SSHTask` writing `url`, `host` and `user` to their outputs [REJECTED: downstream
+  stages and consumers read them].
+- Return nothing for a key that only an ancestor supplied, as `own_value` does for `headers` [REJECTED
+  for `url`: a stage that takes its URL from an upstream output is a normal workflow (E3)].
 
-## Existing test changed
+## Call sites
 
-`tests/http_task/test_http_upstream_keys.py::test_a_stage_planned_again_still_sends_the_headers_it_declared`
-asserted that the context holds the ancestor's headers after a second plan. It now asserts the declared
-headers. The request it checks is unchanged.
+`declared_or_current` is new. Its callers are `tasks/http/task.py` (`url`) and `tasks/ssh.py` (`host`,
+`user`). `DIGESTED_KEYS` grew from 2 to 5 keys. Its readers are `planned_digests` (planner) and nothing
+else; `changed_since_planning` takes the key from its caller.
 
 ## Tests
 
-`tests/test_declared_context_on_replan.py`: two tests red on 0.35.0 and a control, through
-`Orchestrator.restart`. One runs two HTTP stages against a local server and checks the paths requested.
+`tests/test_declared_context_on_replan.py`, through `Orchestrator.restart`: two HTTP stages against a
+local server, an SSH stage after a stage that outputs `host` and `user` with `subprocess.run` replaced,
+and two controls (a key only the ancestor outputs, and an HTTP stage that declares no `url`).
 
 ## Not exercised
 
-A loop-back and a jump through the queue with a declared key. They reach the planner the same way a
-restart does.
+A real SSH connection. A loop-back or a jump into an HTTP stage that declared its `url`; they reach
+the task through the same plan as a restart.

@@ -1,7 +1,8 @@
-"""A stage planned again keeps the values it declared for keys an ancestor also outputs (#122)."""
+"""A restarted HTTP or SSH stage uses the url, host and user it declared, not an upstream stage's (#122)."""
 
 from __future__ import annotations
 
+import subprocess
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -10,7 +11,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from stabilize import HTTPTask, Orchestrator, QueueProcessor, Task, TaskRegistry, TaskResult
+from stabilize import HTTPTask, Orchestrator, QueueProcessor, SSHTask, Task, TaskRegistry, TaskResult
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
@@ -35,8 +36,10 @@ class TwoRoutes(BaseHTTPRequestHandler):
 
 
 class Upstream(Task):
+    outputs: ClassVar[dict[str, Any]] = {}
+
     def execute(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.success(outputs={"target": "from upstream", "only_upstream": "fresh"})
+        return TaskResult.success(outputs={"only_upstream": "fresh", **Upstream.outputs})
 
 
 class FailsOnce(Task):
@@ -80,6 +83,7 @@ def _stage(ref_id: str, task: str, after: str | None = None, **context: Any) -> 
 def _fail_then_restart(stack: Stack, stages: list[StageExecution]) -> Workflow:
     registry = TaskRegistry()
     registry.register("http", HTTPTask)
+    registry.register("ssh", SSHTask)
     registry.register("upstream", Upstream)
     registry.register("fails_once", FailsOnce)
     workflow = Workflow.create(application="replan", name="replan", stages=stages)
@@ -96,25 +100,58 @@ def _fail_then_restart(stack: Stack, stages: list[StageExecution]) -> Workflow:
     return stack.store.retrieve(workflow.id)
 
 
-def test_a_restarted_stage_keeps_the_value_it_declared_for_a_key_its_ancestor_outputs(stack: Stack) -> None:
-    FailsOnce.seen = []
-
-    finished = _fail_then_restart(
-        stack, [_stage("first", "upstream"), _stage("second", "fails_once", "first", target="declared")]
-    )
-
-    assert finished.status == WorkflowStatus.SUCCEEDED
-    assert [target for target, _ in FailsOnce.seen] == ["declared", "declared"], (
-        f"planned again, the stage lost the value it declared to its ancestor's output: {FailsOnce.seen}"
-    )
-
-
 def test_a_restarted_stage_still_takes_a_key_only_its_ancestor_outputs(stack: Stack) -> None:
     FailsOnce.seen = []
+    Upstream.outputs = {}
 
     _fail_then_restart(stack, [_stage("first", "upstream"), _stage("second", "fails_once", "first", target="declared")])
 
     assert [only for _, only in FailsOnce.seen] == ["fresh", "fresh"]
+
+
+def test_a_restarted_ssh_stage_connects_to_the_host_and_user_it_declared(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stabilize.tasks.ssh as ssh_module
+
+    targets: list[str] = []
+
+    def fake_run(cmd: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if list(cmd) == ["ssh", "-V"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        targets.append(next(part for part in cmd if "@" in part))
+        return subprocess.CompletedProcess(cmd, 1 if len(targets) == 1 else 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ssh_module.subprocess, "run", fake_run)
+    Upstream.outputs = {"host": "upstream.example", "user": "upstream"}
+
+    finished = _fail_then_restart(
+        stack,
+        [
+            _stage("first", "upstream"),
+            _stage("second", "ssh", "first", host="own.example", user="deploy", command="true"),
+        ],
+    )
+
+    assert targets == ["deploy@own.example", "deploy@own.example"], (
+        f"the restarted stage did not connect to the host and user it declared: {targets}"
+    )
+    assert finished.status == WorkflowStatus.SUCCEEDED
+
+
+def test_an_http_stage_that_declares_no_url_requests_the_url_its_ancestor_outputs(
+    stack: Stack, two_routes: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("stabilize.tasks.http.task._validate_url_safety", lambda url: None)
+    monkeypatch.setattr("stabilize.tasks.http.task._is_blocked", lambda addr: False)
+    Upstream.outputs = {"url": f"{two_routes}/downstream"}
+
+    _fail_then_restart(
+        stack,
+        [_stage("first", "upstream"), _stage("second", "http", "first", allow_private_urls=True, retries=0)],
+    )
+
+    assert TwoRoutes.paths == ["/downstream", "/downstream"]
 
 
 def test_a_restarted_http_stage_downstream_of_an_http_stage_requests_its_own_url(

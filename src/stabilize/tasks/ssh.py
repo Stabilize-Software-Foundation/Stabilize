@@ -16,6 +16,7 @@ import re
 import subprocess
 from typing import TYPE_CHECKING, Any
 
+from stabilize.models.stage.planned_digests import declared_or_current
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
 
@@ -75,8 +76,8 @@ class SSHTask(Task):
 
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute SSH command on remote host."""
-        host = stage.context.get("host")
-        user = stage.context.get("user", os.environ.get("USER", ""))
+        host = declared_or_current(stage.context, "host")
+        user = declared_or_current(stage.context, "user") if "user" in stage.context else os.environ.get("USER", "")
         command = stage.context.get("command")
         port = stage.context.get("port", 22)
         key_file = stage.context.get("key_file")

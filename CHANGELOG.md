@@ -7,12 +7,16 @@ context after 0.35.0. No schema change is needed.
 
 ### Fixed
 
-- **A stage planned again keeps the values it declared (#122).** A stage's own context value wins
-  over an ancestor's output of the same key on the first plan. On a later plan, after a restart, a
-  jump or a loop, the ancestor's output replaced it. Every `HTTPTask` outputs `url`, and a restarted
-  HTTP stage downstream of another HTTP stage requested the upstream stage's URL. The planner now
-  treats only the values it copied from an ancestor as stale. A copied value is still replaced by the
-  ancestor's current output (#27). `tests/test_declared_context_on_replan.py`.
+- **A restarted HTTP or SSH stage uses the url, host and user it declared (#122).** When a stage is
+  planned again after a restart, a jump or a loop, an ancestor's output replaces the stage's value for
+  a key of the same name. Every `HTTPTask` outputs `url`, and a restarted HTTP stage downstream of
+  another HTTP stage requested the upstream stage's URL. A restarted SSH stage downstream of another
+  SSH stage connected to the upstream stage's `host` as its `user`. Both tasks now read these keys
+  from the value the stage declared, as `headers` and `body` have been read since 0.35.0. The planner
+  is unchanged, because loops rely on the ancestor's output for their variables.
+  `docs/guide/data_flow.rst` said a key set on the stage always takes precedence, and now states the
+  rule as it is. `tests/test_declared_context_on_replan.py`.
+
 - **A deferred-choice member that finishes and then loses passes nothing downstream (#123).** With
   `deferredChoiceClaim: on_complete`, a member's outputs are stored when its task ends and the choice
   is settled two messages later. A member that finished and then lost was stored SKIPPED with its
@@ -68,12 +72,12 @@ context after 0.35.0. No schema change is needed.
 ### Upgrade note
 
 A stage that failed under 0.35.1 or earlier carries no record. A restart of it under 0.35.2 behaves
-as it did before the upgrade. A stage planned by 0.34.6 or earlier carries no `_declared_values`, and
-its declared values are replaced by an ancestor's output on the next plan, as before.
+as it did before the upgrade. A stage planned by 0.35.1 or earlier carries no digest for `url`, `host`
+or `user`, and reads them from its context until it is planned again.
 
-A workflow that relied on an ancestor's output replacing a declared value on a loop or a restart sees
-the declared value from this release. Leave the key out of the stage's context to take the ancestor's
-output on every plan.
+An HTTP stage that declared a `url` and relied on an ancestor's `url` output replacing it from the
+second pass of a loop now keeps the declared one. Leave `url` out of the stage's context to take the
+ancestor's output on every plan. The same holds for `host` and `user` of an SSH stage.
 
 A task that read `error` from its stage's context to learn why its previous run failed no longer finds
 it after a restart or a jump. Keep such state under a key of your own.

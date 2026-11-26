@@ -9,8 +9,6 @@ tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_sends_
 tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_requests_the_url_it_declared|the restarted stage did not request the url it declared
 tests/http_task/test_http_restart_request.py::test_the_record_of_a_failed_attempt_holds_only_the_request_keys_the_response_replaced|the failed attempt left no record of the request it replaced
 tests/http_task/test_http_restart_request.py::test_a_jump_into_a_failed_http_stage_sends_the_declared_headers_and_the_body_the_jump_sets|a jump into a failed stage built its request from the failed response
-tests/test_declared_context_on_replan.py::test_a_restarted_stage_keeps_the_value_it_declared_for_a_key_its_ancestor_outputs|planned again, the stage lost the value it declared to its ancestor's output|tests/test_declared_context_on_replan.py::test_a_restarted_stage_still_takes_a_key_only_its_ancestor_outputs
-tests/test_declared_context_on_replan.py::test_a_restarted_http_stage_downstream_of_an_http_stage_requests_its_own_url|the restarted stage did not request the url it declared
 tests/test_deferred_choice_loser_outputs.py::test_a_member_that_finished_and_then_lost_passes_nothing_downstream|a member that lost the deferred choice kept its outputs|tests/test_deferred_choice_loser_outputs.py::test_the_winner_of_the_choice_passes_its_outputs_downstream
 tests/test_deferred_choice_loser_outputs.py::test_a_finished_member_pruned_by_the_winner_passes_nothing_downstream|a finished member pruned by the winner kept its outputs
 tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_fills_its_url_template_again|the restarted stage requested the url of the failed attempt and not its template
@@ -27,4 +25,5 @@ tests/http_task/test_http_failures.py::test_a_reply_that_is_not_http_is_a_result
 tests/http_task/test_http_failures.py::test_a_body_shorter_than_its_content_length_is_a_failure|a body of 10 bytes was accepted for a Content-Length of 100
 tests/http_task/test_http_failures.py::test_a_restarted_stage_that_succeeds_shows_nothing_of_its_failed_attempt[by-name]|a stage that succeeded after a restart still shows its failed attempt
 tests/http_task/test_http_failures.py::test_a_restarted_stage_that_succeeds_shows_nothing_of_its_failed_attempt[by-class-path]|a stage that succeeded after a restart still shows its failed attempt
-tests/http_task/test_http_upstream_keys.py::test_a_stage_planned_again_still_sends_the_headers_it_declared|on a second plan the stage's declared value is the context value
+tests/test_declared_context_on_replan.py::test_a_restarted_http_stage_downstream_of_an_http_stage_requests_its_own_url|the restarted stage did not request the url it declared|tests/test_declared_context_on_replan.py::test_an_http_stage_that_declares_no_url_requests_the_url_its_ancestor_outputs
+tests/test_declared_context_on_replan.py::test_a_restarted_ssh_stage_connects_to_the_host_and_user_it_declared|the restarted stage did not connect to the host and user it declared|tests/test_declared_context_on_replan.py::test_a_restarted_stage_still_takes_a_key_only_its_ancestor_outputs

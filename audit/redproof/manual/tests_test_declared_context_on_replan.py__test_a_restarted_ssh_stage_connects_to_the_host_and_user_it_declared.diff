@@ -1,0 +1,12 @@
+test-id: tests/test_declared_context_on_replan.py::test_a_restarted_ssh_stage_connects_to_the_host_and_user_it_declared
+--- a/src/stabilize/tasks/ssh.py
++++ b/src/stabilize/tasks/ssh.py
+@@ -76,7 +76,7 @@
+ 
+     def execute(self, stage: StageExecution) -> TaskResult:
+         """Execute SSH command on remote host."""
+-        host = declared_or_current(stage.context, "host")
++        host = stage.context.get("host")
+         user = declared_or_current(stage.context, "user") if "user" in stage.context else os.environ.get("USER", "")
+         command = stage.context.get("command")
+         port = stage.context.get("port", 22)

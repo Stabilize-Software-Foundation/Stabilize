@@ -2,11 +2,11 @@ test-id: tests/http_task/test_http_upstream_keys.py::test_a_stage_planned_again_
 --- a/src/stabilize/handlers/start_stage/planner.py
 +++ b/src/stabilize/handlers/start_stage/planner.py
 @@ -64,7 +64,7 @@
-                     continue
-                 own = declared[key]
+                 # ancestor is authoritative; the copy is stale.
+                 continue
              if key in ancestor_keys:
--                declared[key] = own
+-                declared[key] = value
 +                declared.pop(key, None)
-             if key in merged and isinstance(merged[key], list) and isinstance(own, list):
+             if key in merged and isinstance(merged[key], list) and isinstance(value, list):
+                 # Concatenate lists, avoiding duplicates
                  existing = merged[key]
-                 for item in own:

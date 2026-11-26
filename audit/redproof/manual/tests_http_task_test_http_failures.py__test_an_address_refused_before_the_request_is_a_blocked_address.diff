@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_failures.py::test_an_address_refused_before_the_request_is_a_blocked_address
 --- a/src/stabilize/tasks/http/task.py
 +++ b/src/stabilize/tasks/http/task.py
-@@ -282,7 +282,7 @@
+@@ -283,7 +283,7 @@
              try:
                  _validate_url_safety(url)
              except ValueError as e:

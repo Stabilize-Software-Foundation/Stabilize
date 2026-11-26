@@ -1,0 +1,12 @@
+test-id: tests/test_declared_context_on_replan.py::test_an_http_stage_that_declares_no_url_requests_the_url_its_ancestor_outputs
+--- a/src/stabilize/models/stage/planned_digests.py
++++ b/src/stabilize/models/stage/planned_digests.py
+@@ -61,7 +61,7 @@
+     if not isinstance(digests, dict) or key not in digests:
+         return context.get(key)
+     if not isinstance(declared, dict) or key not in declared:
+-        return context.get(key)
++        return None
+     if digest(context.get(key)) != digests[key]:
+         return context.get(key)
+     return declared[key]
