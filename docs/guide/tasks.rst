@@ -58,18 +58,16 @@ Makes HTTP requests. Supports all methods, JSON, auth, and retries.
     TaskExecution.create("http", "http")
     # Context: {"url": "https://api.com", "method": "POST", "json": {...}}
 
-Request and response keys share names. The task reads its request from the
-context keys ``url``, ``method``, ``headers``, ``body`` and ``json``, and writes
-its response to the outputs ``status_code``, ``headers``, ``body`` and
-``body_json``. Because a stage's context is hydrated with its ancestors' outputs
-before it runs (see :doc:`data_flow`), an HTTP stage downstream of another HTTP
-stage inherits the upstream *response* headers and body as its own *request*
-headers and body unless it sets them itself. A fan-in stage after two HTTP
-stages has sent an upstream ``content-length`` and had the connection reset
-(Provenance, 0.34.2). Declare ``headers`` and ``body`` on every HTTP stage that
-follows another, or drop inherited keys your stage does not declare. 0.35 adds
-``response_headers``, ``response_body`` and ``response_status`` as the
-canonical output names (#106).
+The task reads its request from the context keys ``url``, ``method``, ``headers``, ``body`` and
+``json``. It writes its response to the outputs ``response_status``, ``response_headers``,
+``response_body`` and ``response_body_json``.
+
+Until 2.0.0 it also writes the same four values as ``status_code``, ``headers``, ``body`` and
+``body_json``, the names used before 0.35.0. Two of those are also request keys. A stage's context is
+filled with its ancestors' outputs before it runs (see :doc:`data_flow`), and up to 0.34.6 an HTTP stage
+after another HTTP stage sent the upstream response's headers and body as its own request. From 0.35.0
+the task sends ``headers`` and ``body`` only when the stage declared them. A value that reached the
+context only from an upstream stage is left out of the request (#106).
 
 DockerTask
 ~~~~~~~~~~

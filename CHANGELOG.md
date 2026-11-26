@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.35.0] - 2026-11-26
+
+No schema change is needed to upgrade. `stabilize mg-up` adds one nullable column,
+`queue_messages.locked_by`, which only a pool with a `worker_id` uses. A 0.34.6 process and a 0.35.0
+process can share a queue. See `docs/guide/processor.rst` for the settings named below.
+
+### Changed
+
+- **The processor takes work when it is ready (#116, reported by Webmail).** The poll loop slept one
+  `poll_frequency_ms` whenever the worker pool was full or the queue looked empty, so throughput followed
+  the poll interval: 4 workers at 250 ms handled about 16 messages a second. It now polls when a handler
+  finishes while the pool was full, and when a transaction in the same process that pushed a message
+  commits. `poll_frequency_ms` remains the longest it waits. One poll claims a message for each free
+  worker (`Queue.poll_many`), and the processor holds no lock while it polls.
+  `tests/test_processor_wake.py`.
+
+- **A handler's transaction acknowledges its message (#116).** Each message was polled, looked up in
+  `processed_messages`, handled, and then acknowledged in a transaction of its own. The transaction that
+  marks a message processed now also deletes its queue row, checked against the attempt it was delivered
+  at. A first delivery is no longer looked up. The statement budget for a no-op stage on the synchronous
+  path falls from 87 to 73, and from 67 to 57 for each extra stage. `tests/test_ack_in_transaction.py`,
+  `tests/test_query_budget.py`.
+
+- **A chain of messages runs on one worker (#116).** When a delivery commits one undelayed successor,
+  the row is inserted already leased to that worker and the same thread handles it next. A one-stage
+  workflow is polled once, where each of its seven messages used to wait for a poll.
+  `QueueProcessorConfig.continuation_hops` (16) bounds a chain, and `0` restores a poll per message.
+  `process_one()` and `process_all()` are unchanged. `tests/test_continuation.py`.
+
+- **Engine connections carry a 30 s `lock_timeout` (#116).** `PoolOptions` gains `lock_timeout`,
+  `statement_timeout` and `idle_in_transaction_session_timeout`. Only `lock_timeout` has a default. A
+  value you set for the same setting in `connect_kwargs["options"]` or in the connection string is kept,
+  and `lock_timeout=None` restores the server default. A statement that waits longer fails with SQLSTATE
+  55P03 and its message is redelivered. `tests/test_pool_timeouts.py`.
+
+- **HTTPTask names its response outputs (#106, reported by Provenance).** The task writes
+  `response_status`, `response_headers`, `response_body` and `response_body_json`. It keeps writing
+  `status_code`, `headers`, `body` and `body_json` until 2.0.0. Stage contexts gain the engine key
+  `_declared_keys`, listed in `stabilize.models.stage.engine_keys`.
+
+### Added
+
+- **A cheap idle processor on PostgreSQL, opt-in (#116).** `PostgresQueue(wake_notify=True)` adds a
+  `NOTIFY` to each push that leaves a message for a poll. `QueueProcessorConfig(idle_poll_ms=...)` opens a
+  listening connection and stretches the idle poll to that interval while a notification the processor
+  sends itself keeps arriving. Without that proof, or when a message turns up that nobody announced, the
+  processor polls every `poll_frequency_ms` as before. `tests/test_wake_channel.py`.
+
+- **Fast resume after a kill on PostgreSQL, opt-in (#116).** With `PoolOptions(worker_id=...)` a
+  processor that starts releases the leases its predecessor held, once `pg_stat_activity` shows no
+  session of another incarnation of that worker id. Without a worker id a killed process's messages wait
+  for `lock_duration`, as before. `tests/test_worker_identity.py`.
+
+- `Queue.poll_many`, `Queue.release`, `Queue.settle` and `Queue.push_claimed`, with defaults that keep a
+  queue class written for 0.34 working.
+
+### Fixed
+
+- **A stop during a database outage is bounded (#116, reported by Webmail).** A borrow waited
+  `acquire_timeout` (30 s) for a connection, and the poll did so while holding the lock that `stop()` and
+  each finishing worker needed. On published 0.34.6, `stop()` during an outage took 27.0 s for an idle
+  processor and 61.1 s with a task running. On a processor's own threads a borrow now gives up within 5 s
+  of the stop, and waits 1 s at most once the processor is stopping.
+  `audit/evaluations/probe_stop_during_outage.py`.
+
+- **Recovery leaves a dead-lettered start alone (#116, reported by Webmail).** A workflow that was stored
+  and never started was started again by the recovery sweep even while its `StartWorkflow` sat in the
+  dead-letter table. Recovery now reports it as `dead_lettered`, and `replay_dlq` starts it.
+  `tests/test_recovery_dead_letter_start.py`.
+
+- **A task is not run again before the `scheduled_time` it returned (#116, reported by Webmail).**
+  `TaskResult.running(scheduled_time=...)` was re-queued with the task's backoff alone, so a task asking
+  for 3 s was run again after 1 s. The delay is now the later of the two.
+  `tests/test_running_scheduled_time.py`.
+
+- **An HTTP stage does not send an upstream response's headers or body (#106, reported by Provenance).**
+  A stage's context is filled with its ancestors' outputs, and `headers` and `body` are both a response
+  output and a request input. The request now takes them only when the stage declared them. A stage that
+  declared a key an ancestor also outputs keeps its own value when it is planned again, where a restart
+  or a loop used to replace it with the ancestor's. `tests/http_task/test_http_upstream_keys.py`.
+
+- **`examples/benchmark-overhead.py` reports storage cost apart from the engine's (#113, reported by
+  Webmail).** It prints the SQLite journal mode and synchronous setting, the measured cost of one commit
+  and one read in its directory, and the time spent in commits on a line of its own.
+
 ## [0.34.6] - 2026-11-24
 
 ### Fixed

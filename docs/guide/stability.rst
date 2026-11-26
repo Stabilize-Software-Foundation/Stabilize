@@ -17,6 +17,11 @@ The public API of stabilize, as of 0.34.0, is:
   ``PostgresEventStore``, ``SqliteEventStore``, ``EventStore`` and
   ``SubscriptionManager``;
 * ``TimerTask``, ``WaitTask`` and ``TaskResult.scheduled_time``;
+* from 0.35.0, ``Queue.poll_many``, ``Queue.release``, ``Queue.settle`` and
+  ``Queue.push_claimed``, ``PostgresQueue(wake_notify=...)``, the processor
+  properties ``wake_channel_proven``, ``idle_interval_ms`` and ``last_reclaim``,
+  and the HTTPTask outputs ``response_status``, ``response_headers``,
+  ``response_body`` and ``response_body_json``;
 * tenancy mode, the ``stabilize_tenant`` column, ``Workflow.tenant``,
   ``stabilize.current_tenant()`` and the ``tenant`` argument of every store,
   queue and event store;

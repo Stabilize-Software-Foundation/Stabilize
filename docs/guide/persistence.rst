@@ -250,7 +250,9 @@ transaction. Measured on PostgreSQL 16 for one idle processor:
 =====================  ===================  ==================
 
 Raise ``poll_frequency_ms`` where pickup latency allows; the same cost applies per
-processor instance.
+processor instance. From 0.35.0 ``QueueProcessorConfig.idle_poll_ms`` with
+``PostgresQueue(wake_notify=True)`` lowers the idle cost and keeps pickup fast (see
+:doc:`processor`).
 
 Querying stages across workflows
 --------------------------------

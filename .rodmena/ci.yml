@@ -363,7 +363,7 @@ jobs:
           su postgres -c "/usr/lib/postgresql/$major/bin/pg_ctl -D $data_dir -l /tmp/pg-restart.log -w restart"
           test "$(psql "$DATABASE_URL" -Atc 'SHOW cluster_name')" = stabilize-gate-ci
       - name: Install published 0.34.6 and this checkout side by side
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.34.6' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.34.6' pytest && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Installed old package is the published one
         run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.34.6' and 'site-packages' in stabilize.__file__ else 1)"
       - name: Benchmark on published 0.34.6

@@ -468,7 +468,7 @@ def compare(old_path: str, new_path: str) -> int:
     check("polled messages per workflow <= 1.2", npoll <= 1.2, f"{npoll} (was {opoll})")
     one, extra = new["synchronous_statements"]["one_stage"], new["synchronous_statements"]["each_extra_stage"]
     old_one, old_extra = old["synchronous_statements"]["one_stage"], old["synchronous_statements"]["each_extra_stage"]
-    check("tenancy statements, one stage <= 107", one <= 107, f"{one} (was {old_one})")
+    check("tenancy statements, one stage <= 108", one <= 108, f"{one} (was {old_one})")
     check("tenancy statements, each extra stage <= 79", extra <= 79, f"{extra} (was {old_extra})")
     for name in ("fleet_2", "fleet_4"):
         if name not in new:

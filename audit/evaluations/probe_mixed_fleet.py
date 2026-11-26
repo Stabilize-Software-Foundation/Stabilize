@@ -63,7 +63,7 @@ def child(kind: str, url: str, effects: str) -> int:
     processor = QueueProcessor(
         queue, config=QueueProcessorConfig(poll_frequency_ms=20, max_workers=4), store=store, task_registry=registry
     )
-    Path(effects + ".version").write_text(stabilize.__version__)
+    Path(effects + ".version").write_text(f"{stabilize.__version__} from {Path(stabilize.__file__).parent}")
     processor.start()
     while not os.path.exists(effects + ".stop"):
         time.sleep(0.05)
@@ -142,6 +142,8 @@ def run_case(kind: str, url: str, old_python: str) -> tuple[bool, str]:
     )
     if versions[0] == versions[1]:
         return False, f"PROBE INVALID: both processes run {versions[0]}; {detail}"
+    if "site-packages" not in versions[0] or "site-packages" in versions[1]:
+        return False, f"PROBE INVALID: the first process must run a published release and the second this checkout; {detail}"
     if not by_old or not by_new:
         return False, f"PROBE INVALID: one release handled no task; {detail}"
     return not pending and not repeated and not missing, detail
