@@ -23,6 +23,14 @@ directly.
   `stabilize.models.stage.engine_keys`. A consumer that builds its exclusion list from that module
   picks it up.
 
+### Documentation
+
+- **The 0.34 upgrade runbook names a prune step that can be run (#120).** It told every install to
+  run `prune-processed` before `mg-up`. The command of 0.34.0 and later refuses a schema below 0.34,
+  and releases below 0.33.0 have no such command. The runbook now says to prune with an installed
+  0.33.x before installing the new release, and to go straight to `mg-up` from anything older. pdfapi
+  reported it from an upgrade of a 0.21.1 schema.
+
 ### Upgrade note
 
 A stage planned by 0.35.0 and run by 0.35.1 carries no digest. It behaves as on 0.35.0 until it is

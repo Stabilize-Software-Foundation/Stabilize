@@ -348,9 +348,21 @@ the ``HandlerConfig`` the processor ran with when the workflow started.
 Upgrading to 0.34
 -----------------
 
-Run ``stabilize prune-processed`` before ``mg-up``. One migration rewrites every row of
-``processed_messages``, and the fewer rows there are the shorter the lock. That migration
-changes ``processed_at`` from ``TIMESTAMP`` to ``TIMESTAMPTZ`` without a ``USING`` clause.
+One migration rewrites every row of ``processed_messages``, and the fewer rows there are the
+shorter the lock. Pruning shortens it only when it happens before ``mg-up``, and which command can do
+that depends on the release you start from:
+
+- **On 0.33.x**, run ``stabilize prune-processed`` with the release you have installed, before you
+  install the new one.
+- **Below 0.33.0** there is no ``prune-processed`` command. Go straight to ``mg-up``. It rewrites
+  every row there is, and the lock lasts as long as that rewrite.
+
+The ``prune-processed`` of 0.34.0 and later cannot do this step. It reads the tenancy mode first and
+refuses a schema that ``mg-up`` has not yet brought to 0.34, with ``stabilize_tenancy does not exist in
+this schema; run stabilize mg-up``. Up to 0.35.0 this section told every install to prune first and
+did not say with which release (#120). After ``mg-up`` the new command works as usual.
+
+That migration changes ``processed_at`` from ``TIMESTAMP`` to ``TIMESTAMPTZ`` without a ``USING`` clause.
 PostgreSQL therefore reads the stored values in the session's zone. ``mg-up`` prints its zone
 (``TimeZone: UTC``) and refuses to convert while a role or database setting names another
 zone, because the engine processes may have written under it. Pass
