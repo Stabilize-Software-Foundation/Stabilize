@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 PLANNED_DIGESTS = "_planned_digests"
 DIGESTED_KEYS = frozenset({"headers", "body"})
@@ -49,4 +51,4 @@ def changed_since_planning(context: Mapping[str, Any], key: str) -> bool:
     digests = context.get(PLANNED_DIGESTS)
     if not isinstance(digests, dict) or key not in digests:
         return False
-    return digest(context.get(key)) != digests[key]
+    return bool(digest(context.get(key)) != digests[key])
