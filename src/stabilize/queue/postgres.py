@@ -27,10 +27,10 @@ from stabilize.persistence.tenancy import (
     postgres_mode,
     validate_tenant,
 )
-from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
-from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
+from stabilize.queue.message_ids import own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
+from stabilize.queue.postgres_claim import PostgresClaimMixin
 from stabilize.queue.postgres_lookups import DELIVERABLE, PostgresQueueLookupsMixin
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ _TENANT = " AND stabilize_tenant = %(tenant)s"
 _DELIVERABLE = DELIVERABLE
 
 
-class PostgresQueue(PostgresQueueLookupsMixin, Queue):
+class PostgresQueue(PostgresClaimMixin, PostgresQueueLookupsMixin, Queue):
     """PostgreSQL-backed queue implementation.
 
     Uses FOR UPDATE SKIP LOCKED for concurrent message processing across
@@ -198,6 +198,7 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
                     cur.execute(sql, params)
                 conn.commit()
             record_bare_push(message_type)
+            self.announce_ready(delay.total_seconds() if delay else 0.0)
 
         # Invalidate size cache
         self._size_cache = None
@@ -208,58 +209,6 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         if message:
             callback(message)
             self.ack(message)
-
-    def poll_one(self) -> Message | None:
-        """Poll for a single message without callback."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    UPDATE {self.table_name}
-                    SET locked_until = NOW() + %(lock_seconds)s * INTERVAL '1 second',
-                        attempts = attempts + 1
-                    WHERE id = (
-                        SELECT id FROM {self.table_name}
-                        WHERE deliver_at <= NOW()
-                        AND stabilize_tenant = %(tenant)s
-                        AND (locked_until IS NULL OR locked_until < NOW())
-                        AND {_DELIVERABLE}
-                        ORDER BY deliver_at
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
-                    )
-                    RETURNING id, message_type, payload::text AS payload, attempts, store_retries
-                    """,
-                    {
-                        "lock_seconds": self.lock_duration.total_seconds(),
-                        "max_attempts": self.max_attempts,
-                        "budget": self.store_retry_budget.total_seconds(),
-                        "tenant": self.tenant,
-                    },
-                )
-                row = cur.fetchone()
-            conn.commit()
-
-        if not row:
-            return None
-
-        msg_id = row["id"]
-        msg_type = row["message_type"]
-        try:
-            message = decode_message(msg_type, row["payload"])
-        except MessageDecodeError as exc:
-            logger.error("Moving undecodable message %s to the DLQ: %s", msg_id, exc)
-            self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
-            return None
-
-        message.message_id = delivery_key(self.table_name, msg_id)
-        message.attempts = row["attempts"]
-        message.store_retries = int(row["store_retries"] or 0)
-        self._pending[msg_id] = {
-            "message": message,
-            "type": msg_type,
-        }
-        return message
 
     def ack(self, message: Message) -> None:
         """Acknowledge a message, removing it from the queue."""
@@ -354,6 +303,7 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             conn.commit()
 
         self._pending.pop(msg_id, None)
+        self.announce_ready(max(0.0, delay.total_seconds()))
 
     def live_delivery_keys(self, keys: list[str]) -> set[str]:
         owned = own_row_ids(self.table_name, keys)
@@ -440,7 +390,10 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         """Replay a message from the DLQ back to the main queue."""
         from stabilize.queue.dlq import replay_dlq as _replay_dlq
 
-        return _replay_dlq(self._engine, self.table_name, dlq_id)
+        replayed = _replay_dlq(self._engine, self.table_name, dlq_id)
+        if replayed:
+            self.announce_ready()
+        return replayed
 
     def dlq_size(self) -> int:
         """Get the number of messages in the Dead Letter Queue."""

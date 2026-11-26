@@ -38,6 +38,8 @@ class MessageSubmissionMixin:
 
         def _latch(self, exc: BaseException) -> None: ...
 
+        def _worker_finished(self) -> None: ...
+
     def _start_lock_heartbeat(self, message: Message) -> threading.Event | None:
         """Renew this message's queue lock while its handler executes."""
         return start_lock_heartbeat(self.queue, self.config, message)
@@ -89,8 +91,7 @@ class MessageSubmissionMixin:
                 if msg_id:
                     with self._in_flight_lock:
                         self._in_flight.discard(msg_id)
-                with self._lock:
-                    self._active_count -= 1
+                self._worker_finished()
 
         try:
             if self._executor is None:

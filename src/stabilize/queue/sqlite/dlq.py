@@ -189,6 +189,9 @@ class SqliteDLQMixin:
         conn.commit()
 
         logger.info("Replayed DLQ entry %s (type=%s)", dlq_id, row["message_type"])
+        announce = getattr(self, "announce_ready", None)
+        if callable(announce):
+            announce()
         return True
 
     def dlq_size(self) -> int:

@@ -21,10 +21,10 @@ from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
-from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue, QueueCounts
-from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
+from stabilize.queue.message_ids import own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
+from stabilize.queue.sqlite.claim import SqliteClaimMixin
 from stabilize.queue.sqlite.dlq import SqliteDLQMixin
 from stabilize.queue.sqlite.lookups import SqliteQueueLookupsMixin
 from stabilize.queue.sqlite.schema import create_queue_tables, ensure_redelivery_columns
@@ -44,7 +44,7 @@ _DELIVERABLE = (
 )
 
 
-class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
+class SqliteQueue(SqliteClaimMixin, SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
     """SQLite-backed queue implementation.
 
     Uses optimistic locking with a version column for concurrent access.
@@ -165,6 +165,7 @@ class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
         if not external_connection:
             conn.commit()
             record_bare_push(message_type)
+            self.announce_ready(delay.total_seconds() if delay else 0.0)
 
         logger.debug("Pushed %s (id=%s, deliver_at=%s)", message_type, message_id, deliver_at)
 
@@ -174,97 +175,6 @@ class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
         if message:
             callback(message)
             self.ack(message)
-
-    def poll_one(self) -> Message | None:
-        """Poll for a single message using optimistic locking.
-
-        This implementation uses a version column to handle concurrent
-        access without FOR UPDATE SKIP LOCKED:
-
-        1. SELECT a candidate message with current version
-        2. Try to UPDATE with WHERE version = expected
-        3. If rowcount == 0, another worker got it - return None
-        4. If rowcount == 1, we claimed it successfully
-
-        Returns:
-            The claimed message or None if no message available
-        """
-        conn = self._get_connection()
-        locked_until = datetime.now(UTC) + self.lock_duration
-
-        # Step 1: Find a candidate message
-        result = conn.execute(
-            f"""
-            SELECT id, message_type, payload, attempts, version, store_retries
-            FROM {self.table_name}
-            WHERE julianday(deliver_at) <= julianday(:now)
-            AND stabilize_tenant = :tenant
-            AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now))
-            AND {_DELIVERABLE}
-            ORDER BY deliver_at
-            LIMIT 1
-            """,
-            {
-                "max_attempts": self.max_attempts,
-                "now": datetime.now(UTC).isoformat(),
-                "tenant": self.tenant,
-                "budget_days": self._budget_days(),
-            },
-        )
-        row = result.fetchone()
-
-        if not row:
-            return None
-
-        msg_id = row["id"]
-        msg_type = row["message_type"]
-        payload = row["payload"]
-        attempts = row["attempts"]
-        version = row["version"]
-
-        # Step 2: Try to claim with optimistic lock
-        cursor = conn.execute(
-            f"""
-            UPDATE {self.table_name}
-            SET locked_until = :locked_until,
-                attempts = attempts + 1,
-                version = version + 1
-            WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
-            """,
-            {
-                "id": msg_id,
-                "locked_until": locked_until.isoformat(),
-                "version": version,
-                "tenant": self.tenant,
-            },
-        )
-        conn.commit()
-
-        # Step 3: Check if we won the race
-        if cursor.rowcount == 0:
-            # Another worker grabbed it
-            logger.debug("Lost race for message %s, will retry", msg_id)
-            return None
-
-        # Step 4: Successfully claimed - deserialize and return
-        try:
-            message = decode_message(msg_type, payload)
-        except MessageDecodeError as exc:
-            logger.error("Moving undecodable message %s to the DLQ: %s", msg_id, exc)
-            self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
-            return None
-
-        message.message_id = delivery_key(self.table_name, msg_id)
-        message.attempts = attempts + 1
-        message.store_retries = int(row["store_retries"] or 0)
-
-        self._pending[msg_id] = {
-            "message": message,
-            "type": msg_type,
-        }
-
-        logger.debug("Polled %s (id=%s, attempts=%d)", msg_type, msg_id, attempts + 1)
-        return message
 
     def ack(self, message: Message) -> None:
         """Acknowledge a message, removing it from the queue."""
@@ -359,6 +269,7 @@ class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
         conn.commit()
 
         self._pending.pop(msg_id, None)
+        self.announce_ready(max(0.0, delay.total_seconds()))
         logger.debug("Rescheduled message (id=%s, deliver_at=%s)", msg_id, deliver_at)
 
     def live_delivery_keys(self, keys: list[str]) -> set[str]:

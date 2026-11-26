@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Hashable
     from datetime import timedelta
 
     from stabilize.queue.messages import Message
@@ -73,6 +73,47 @@ class Queue(ABC):
         Returns:
             The message or None
         """
+
+    def poll_many(self, limit: int) -> list[Message]:
+        """Claim up to *limit* deliverable messages; each one must be acknowledged, rescheduled or released."""
+        polled: list[Message] = []
+        while len(polled) < limit:
+            message = self.poll_one()
+            if message is None:
+                break
+            polled.append(message)
+        return polled
+
+    def release(self, message: Message) -> bool:
+        """Hand back a claimed message that no handler received: visible at once, its attempt not spent.
+
+        Returns False when the lease was taken by another delivery since the claim.
+        """
+        from datetime import timedelta
+
+        self.reschedule(message, timedelta(0))
+        return True
+
+    def settle(self, message: Message) -> None:
+        """Forget a claimed message whose row a committed transaction already removed."""
+        return
+
+    def push_claimed(self, message: Message, connection: Any) -> Message | None:
+        """Insert *message* on *connection* already leased to this consumer and return it as a poll would.
+
+        Returns None when the queue cannot do so; the caller then pushes it normally.
+        """
+        return None
+
+    def wake_key(self) -> Hashable | None:
+        """What identifies this queue's table in this process, for announcements between queue objects."""
+        return ("object", id(self))
+
+    def announce_ready(self, due_in: float = 0.0) -> None:
+        """Tell this process's consumers of the table that a message is ready now or in *due_in* seconds."""
+        from stabilize.queue import wake
+
+        wake.announce(self.wake_key(), due_in)
 
     def live_delivery_keys(self, keys: list[str]) -> set[str]:
         """The keys among keys whose message is still in this queue; every key when the queue cannot tell."""

@@ -58,6 +58,7 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._marked_ids: list[str] = []
         self._pushed = False
+        self._due_in: float | None = None
         self._written_tasks: Captured = []
 
     def on_commit(self) -> None:
@@ -67,6 +68,9 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
         record_committed(self._marked_ids, pushed=self._pushed)
         commit_captured(self._written_tasks)
         self._written_tasks = []
+        announce = getattr(self._queue, "announce_ready", None)
+        if self._due_in is not None and callable(announce):
+            announce(self._due_in)
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.
@@ -150,6 +154,8 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
 
         self._pushed = True
         self._queue.push(message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn)
+        due_in = max(0.0, float(delay or 0))
+        self._due_in = due_in if self._due_in is None else min(self._due_in, due_in)
 
     def mark_message_processed(
         self,

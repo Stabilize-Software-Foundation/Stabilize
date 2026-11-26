@@ -61,7 +61,9 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
         self._conn = conn
         self._store = store
         self._tenant = store.tenant
+        self._queue = queue
         self._queue_table = _queue_table_for(store, queue)
+        self._due_in: float | None = None
         # Track stage objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._marked_ids: list[str] = []
@@ -75,6 +77,20 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
         record_committed(self._marked_ids, pushed=self._pushed)
         commit_captured(self._written_tasks)
         self._written_tasks = []
+        if self._due_in is not None:
+            self._announce(self._due_in)
+
+    def _announce(self, due_in: float) -> None:
+        announce = getattr(self._queue, "announce_ready", None)
+        if callable(announce):
+            announce(due_in)
+            return
+        from stabilize.persistence.connection import get_connection_manager
+        from stabilize.queue import wake
+        from stabilize.queue.sqlite.claim import sqlite_wake_key
+
+        key = sqlite_wake_key(get_connection_manager(), self._store.connection_string, self._queue_table, self._tenant)
+        wake.announce(key, due_in)
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.
@@ -263,6 +279,8 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
         payload = json.dumps(data)
 
         self._pushed = True
+        due_in = max(0.0, float(delay or 0))
+        self._due_in = due_in if self._due_in is None else min(self._due_in, due_in)
         self._conn.execute(
             f"""
             INSERT INTO {self._queue_table} (
