@@ -1,0 +1,12 @@
+test-id: tests/test_declared_context_on_replan.py::test_a_restarted_http_stage_downstream_of_an_http_stage_requests_its_own_url
+--- a/src/stabilize/handlers/start_stage/planner.py
++++ b/src/stabilize/handlers/start_stage/planner.py
+@@ -62,7 +62,7 @@
+             if key in previously_hydrated and key in ancestor_keys:
+                 if key not in declared:
+                     continue
+-                own = declared[key]
++                continue
+             if key in ancestor_keys:
+                 declared[key] = own
+             if key in merged and isinstance(merged[key], list) and isinstance(own, list):

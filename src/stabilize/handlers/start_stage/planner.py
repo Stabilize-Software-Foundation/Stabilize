@@ -58,21 +58,20 @@ class StartStagePlannerMixin:
                 # A reducer produced the authoritative value for this key;
                 # do not let the join stage's own context override it.
                 continue
+            own = value
             if key in previously_hydrated and key in ancestor_keys:
-                # This value was copied from an ancestor on an earlier plan of
-                # this stage. On a re-entry (jump, restart, loop-back) the
-                # ancestor is authoritative; the copy is stale.
-                continue
+                if key not in declared:
+                    continue
+                own = declared[key]
             if key in ancestor_keys:
-                declared[key] = value
-            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
-                # Concatenate lists, avoiding duplicates
+                declared[key] = own
+            if key in merged and isinstance(merged[key], list) and isinstance(own, list):
                 existing = merged[key]
-                for item in value:
+                for item in own:
                     if item not in existing:
                         existing.append(item)
             else:
-                merged[key] = value
+                merged[key] = own
 
         if ancestor_keys:
             merged[HYDRATED_KEYS] = sorted(ancestor_keys)

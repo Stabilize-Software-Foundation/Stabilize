@@ -1,0 +1,11 @@
+test-id: tests/test_deferred_choice_loser_outputs.py::test_a_member_that_finished_and_then_lost_passes_nothing_downstream
+--- a/src/stabilize/handlers/complete_stage/deferred.py
++++ b/src/stabilize/handlers/complete_stage/deferred.py
+@@ -53,7 +53,6 @@
+                     handler._fan_out_in(txn, fresh, status, message)
+                 elif decision.outcome in ("loser", "failed_loser"):
+                     fresh.context[PRUNED] = True
+-                    fresh.outputs = {}
+                     if decision.outcome == "failed_loser":
+                         fresh.context[DEFERRED_CHOICE_FAILED] = True
+                     handler.set_stage_status(fresh, WorkflowStatus.SKIPPED)

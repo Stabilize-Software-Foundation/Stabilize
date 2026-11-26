@@ -67,10 +67,12 @@ Until 2.0.0 it also writes the same four values as ``status_code``, ``headers``,
 filled with its ancestors' outputs before it runs (see :doc:`data_flow`), and up to 0.34.6 an HTTP stage
 after another HTTP stage sent the upstream response's headers and body as its own request. From 0.35.0
 the task sends ``headers`` and ``body`` only when the stage declared them. A value that reached the
-context only from an upstream stage is left out of the request (#106). When a stage is planned again
-by a restart or a loop, the context takes the ancestor's output for a shared key, as the data-flow rule
-says. The planner keeps the stage's declared value under the engine key ``_declared_values``, and the
-request reads it from there.
+context only from an upstream stage is left out of the request (#106). The planner keeps the stage's
+declared value for a shared key under the engine key ``_declared_values``. When a stage is planned
+again by a restart, a jump or a loop, a value the planner copied from an ancestor is replaced by the
+ancestor's current output, and a value the stage declared stays. Up to 0.35.1 the ancestor's output
+also replaced a declared value on the second plan, and a restarted HTTP stage after another HTTP stage
+requested the upstream stage's ``url`` (#122).
 
 A task may also set ``headers`` or ``body`` when it runs, in the stage's context or in a copy of the
 stage that it hands to ``HTTPTask.execute``. A subclass that adds an ``Authorization`` header this way

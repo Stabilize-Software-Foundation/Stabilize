@@ -53,6 +53,7 @@ class CompleteStageDeferredMixin:
                     handler._fan_out_in(txn, fresh, status, message)
                 elif decision.outcome in ("loser", "failed_loser"):
                     fresh.context[PRUNED] = True
+                    fresh.outputs = {}
                     if decision.outcome == "failed_loser":
                         fresh.context[DEFERRED_CHOICE_FAILED] = True
                     handler.set_stage_status(fresh, WorkflowStatus.SKIPPED)

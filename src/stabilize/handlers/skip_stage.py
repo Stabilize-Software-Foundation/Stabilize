@@ -104,6 +104,7 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
                 from stabilize.resilience.cancellation import cancel_task
 
                 stage.context[PRUNED] = True
+                stage.outputs = {}
                 for task in stage.tasks:
                     if task.status in _LIVE_TASK_STATUSES:
                         if task.status != WorkflowStatus.NOT_STARTED:

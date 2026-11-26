@@ -2,9 +2,23 @@
 
 ## [0.35.2] - 2026-11-26
 
-One fix for a defect that is older than 0.34.6. No schema change is needed.
+Fixes for defects that are older than 0.34.6, found by an audit of the HTTP task and the stage
+context after 0.35.0. No schema change is needed.
 
 ### Fixed
+
+- **A stage planned again keeps the values it declared (#122).** A stage's own context value wins
+  over an ancestor's output of the same key on the first plan. On a later plan, after a restart, a
+  jump or a loop, the ancestor's output replaced it. Every `HTTPTask` outputs `url`, and a restarted
+  HTTP stage downstream of another HTTP stage requested the upstream stage's URL. The planner now
+  treats only the values it copied from an ancestor as stale. A copied value is still replaced by the
+  ancestor's current output (#27). `tests/test_declared_context_on_replan.py`.
+- **A deferred-choice member that finishes and then loses passes nothing downstream (#123).** With
+  `deferredChoiceClaim: on_complete`, a member's outputs are stored when its task ends and the choice
+  is settled two messages later. A member that finished and then lost was stored SKIPPED with its
+  outputs, and the stage after the choice merged them with the winner's. Where both set a key, the
+  member with the later `ref_id` won. A loser is now stored with empty outputs, at its own completion
+  and when the winner prunes it. `tests/test_deferred_choice_loser_outputs.py`.
 
 - **A restarted HTTP stage sends the request it declared (#119).** When a request ends in a status
   the stage does not accept, `HTTPTask` writes the response into the stage's context under `url`,
@@ -31,7 +45,12 @@ One fix for a defect that is older than 0.34.6. No schema change is needed.
 ### Upgrade note
 
 A stage that failed under 0.35.1 or earlier carries no record. A restart of it under 0.35.2 behaves
-as it did before the upgrade.
+as it did before the upgrade. A stage planned by 0.34.6 or earlier carries no `_declared_values`, and
+its declared values are replaced by an ancestor's output on the next plan, as before.
+
+A workflow that relied on an ancestor's output replacing a declared value on a loop or a restart sees
+the declared value from this release. Leave the key out of the stage's context to take the ancestor's
+output on every plan.
 
 ## [0.35.1] - 2026-11-26
 

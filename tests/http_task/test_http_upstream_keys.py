@@ -119,8 +119,8 @@ def test_a_stage_planned_again_still_sends_the_headers_it_declared(stack: Stack)
     assert first.get_header("X-own") == "declared"
 
     handler._plan_stage(loaded)
-    assert loaded.context["headers"] == {"Server": "upstream"}, (
-        "on a second plan the ancestor's output is the context value, which loops rely on"
+    assert loaded.context["headers"] == {"X-Own": "declared"}, (
+        "on a second plan the stage's declared value is the context value, as on the first"
     )
     assert loaded.context["only_upstream"] == 1
     again, _ = build_request("GET", "http://example.invalid/", loaded.context, [])
