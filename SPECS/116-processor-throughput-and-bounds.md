@@ -55,7 +55,7 @@ Plan approved 2026-11-26.
   listening processor so that start-to-task p95 is at most 100 ms.
 - E13 (W6). If a timeout poll finds a message ready for longer than `max(2 x poll_frequency_ms, 200 ms)`,
   then the processor shall log the remedy and poll every `poll_frequency_ms` for 5 minutes.
-- E14 (W7). Where `worker_id` is set, when the processor starts and `pg_stat_activity` shows its own
+- E14 (W7). Where `PoolOptions(worker_id=...)` is set, when the processor starts and `pg_stat_activity` shows its own
   incarnation and no other incarnation of that worker id, it shall release every message locked by that
   worker id. Otherwise it shall release none and log a warning.
 - E15 (W7). If `worker_id` is set and the queue table lacks `locked_by`, then `start()` shall raise
@@ -66,7 +66,9 @@ Plan approved 2026-11-26.
   `scheduled_time`.
 - E18 (W9, #113). `benchmark-overhead.py` shall print journal mode, measured commit and read cost, and
   commit time on its own line.
-- E19 (W10, #106). As ticket #106.
+- E19 (W10, #106). As ticket #106. The planner shall record, under the engine key `_declared_values`,
+  the value a stage declared for a key an ancestor also outputs, and HTTPTask shall take `headers` and
+  `body` from that record when it exists, and never from a value that only an ancestor supplied.
 - E20. With every new option at its default, a published 0.34.6 process and a 0.35.0 process sharing one
   queue shall run 200 workflows with each task effect present once.
 - E21. Statements for a one-stage workflow on the synchronous path shall be at most 73 (single mode) and
@@ -154,6 +156,30 @@ remainder and stay out of scope.
 - Rewriting handler reads: the code the kill tests and red-proofs are written against.
 - psycopg pipeline mode for the tenant arm: pooler support on the estate is unknown.
 - Deferring the tenant arm on read-only transactions: about 7% of round trips, and it touches the fence.
+
+## Changes during implementation (2026-11-26)
+
+- `worker_id` is a field of `PoolOptions`, not of `QueueProcessorConfig`. The identity has to be on the
+  pool's sessions, and the pool exists before any processor.
+- The session timeouts are read back by one statement on the first borrow of a pool. A wrapper around
+  the caller's `configure` was tried and rejected: it replaced the callback object the pool receives.
+- After an empty poll at the stretched interval, the next due time is read in a transaction of its own.
+- New options are fields of `QueueProcessorConfig`, `PoolOptions` and `PostgresQueue` only.
+  `HandlerConfig` is unchanged because its fields enter the config fingerprint stored on workflows.
+- In-transaction acknowledgement and the first-delivery skip apply to queue classes that declare
+  `counts_deliveries` (the two shipped queues). A third-party queue keeps the 0.34.6 path.
+- #106: keeping a stage's declared value in its context when the stage is planned again was tried and
+  REJECTED. `tests/test_structured_loops.py` showed that loops rely on an ancestor's output replacing
+  the value on re-entry. The declared value is kept in `_declared_values` for the task to read.
+- A task registered under a built-in stage type's name (`wait`) is reported by a warning at
+  registration. Raising was rejected: hosts that register such a name today would stop starting.
+- `scheduled_time` on a RUNNING result was confirmed as a bug on 0.34.6 and is honoured as a lower
+  bound: the delay is the later of the backoff and the time asked for.
+- Existing tests edited, each because it asserted the contract this ticket changes:
+  `test_query_budget.py` (87/67 to 73/57), `test_delivery_marks.py` (a handled message's row leaves with
+  its transaction), `test_pool_options_and_lifetime.py` (the default pool sets `lock_timeout`),
+  `test_engine_columns.py` (optional columns). `probe_sigkill_before_ack.py` also kills at
+  `queue.settle`.
 
 ## Invariants
 
