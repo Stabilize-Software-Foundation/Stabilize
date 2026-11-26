@@ -1,0 +1,30 @@
+test-id: tests/test_no_transaction_during_task.py::test_no_engine_session_holds_a_transaction_while_a_task_runs
+--- a/src/stabilize/handlers/run_task/handler.py
++++ b/src/stabilize/handlers/run_task/handler.py
+@@ -358,15 +358,17 @@
+                         task_type=message.task_type,
+                         task_name=task_model.name,
+                     ):
+-                        result = execute_with_timeout(
+-                            task,
+-                            stage,
+-                            timeout,
+-                            message,
+-                            self.bulkhead_manager,
+-                            self.circuit_factory,
+-                            self.process_executor,
+-                        )
++                        with self.repository.transaction(self.queue) as held_open:
++                            held_open.lock_admission("held-open")
++                            result = execute_with_timeout(
++                                task,
++                                stage,
++                                timeout,
++                                message,
++                                self.bulkhead_manager,
++                                self.circuit_factory,
++                                self.process_executor,
++                            )
+                     result = with_gate_record(result, task, stage, task_model)
+ 
+                 verify_task_outputs(stage, result, self.task_registry)
