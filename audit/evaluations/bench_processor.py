@@ -576,9 +576,32 @@ def compare(old_path: str, new_path: str) -> int:
     width = max(len(label) for label, _, _ in checks)
     for label, ok, detail in checks:
         print(f"[{'PASS' if ok else 'FAIL'}] {label.ljust(width)}  {detail}")
+    _report_c_driver(Path(old_path).parent)
     failed = [label for label, ok, _ in checks if not ok]
     print(f"VERDICT: {'PASS' if not failed else 'FAIL'} ({len(checks) - len(failed)} of {len(checks)})")
     return 1 if failed else 0
+
+
+def _report_c_driver(directory: Path) -> None:
+    """Print, without judging, the runs made with psycopg's C implementation when both exist."""
+    old_c, new_c = directory / "bench-old-c.json", directory / "bench-new-c.json"
+    if not (old_c.exists() and new_c.exists()):
+        print("C implementation: not measured in this job")
+        return
+    old = json.loads(old_c.read_text())
+    new = json.loads(new_c.read_text())
+    print(f"C implementation ({old['version']} on {old['driver']}, {new['version']} on {new['driver']}), reported only:")
+    rows = [
+        ("CPU ms per message, synchronous", "unprofiled", "cpu_ms_per_message"),
+        ("wall ms per message, synchronous", "unprofiled", "wall_ms_per_message"),
+        ("one idle workflow, median s", "single", "median_total_s"),
+        ("500 preloaded, workflows per second", "preloaded", "per_second"),
+        ("paced p95 s", "paced", "p95_s"),
+    ]
+    for label, scenario, key in rows:
+        before = old.get(scenario, {}).get(key)
+        after = new.get(scenario, {}).get(key)
+        print(f"  {label.ljust(38)} {before} -> {after}")
 
 
 def main() -> int:
