@@ -7,3 +7,5 @@ tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_sends_
 tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_with_no_declared_headers_sends_none_of_the_failed_response|the response of the failed attempt was sent as the restarted request
 tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_sends_its_declared_body|the restarted request did not carry the body the stage declared
 tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_requests_the_url_it_declared|the restarted stage did not request the url it declared
+tests/http_task/test_http_restart_request.py::test_the_record_of_a_failed_attempt_holds_only_the_request_keys_the_response_replaced|the failed attempt left no record of the request it replaced
+tests/http_task/test_http_restart_request.py::test_a_jump_into_a_failed_http_stage_sends_the_declared_headers_and_the_body_the_jump_sets|a jump into a failed stage built its request from the failed response

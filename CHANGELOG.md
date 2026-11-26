@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.35.2] - 2026-11-26
+
+One fix for a defect that is older than 0.34.6. No schema change is needed.
+
+### Fixed
+
+- **A restarted HTTP stage sends the request it declared (#119).** When a request ends in a status
+  the stage does not accept, `HTTPTask` writes the response into the stage's context under `url`,
+  `headers` and `body`, the keys the request is built from. A stage that was then restarted with
+  `Orchestrator.restart`, or re-entered by a jump, sent the failed response's headers and body as its
+  next request and lost the ones it declared. After a redirect it went to the redirect target. The
+  engine now records what the response replaced under the engine key `_displaced_request` and puts
+  the three keys back when the stage is reset. A key whose value was changed after the failure is left
+  alone. The context of a failed stage reads as before until the reset.
+  `tests/http_task/test_http_restart_request.py`.
+
+### Added
+
+- **`Task.request_context_keys` (#119).** A task class lists the context keys it builds its request
+  from. `HTTPTask` lists `url`, `headers` and `body`. The default is empty, and the context a failed
+  result leaves behind is kept across a restart for such a task, as in 0.35.1.
+
+### Changed
+
+- **One more engine context key (#119).** `_displaced_request` is listed in
+  `stabilize.models.stage.engine_keys`. It appears in the context of a stage whose HTTP task failed
+  and is removed when the stage is reset.
+
+### Upgrade note
+
+A stage that failed under 0.35.1 or earlier carries no record. A restart of it under 0.35.2 behaves
+as it did before the upgrade.
+
 ## [0.35.1] - 2026-11-26
 
 One fix for a regression in 0.35.0. No schema change is needed, and 0.34.6 can be upgraded to 0.35.1

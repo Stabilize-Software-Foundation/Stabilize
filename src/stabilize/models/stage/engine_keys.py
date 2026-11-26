@@ -91,6 +91,7 @@ SIGNAL_KEYS = frozenset(
 
 TASK_LIFECYCLE_KEYS = frozenset(
     {
+        "_displaced_request",
         "_gate_checked",
         "_paused_at",
         "_paused_ms",

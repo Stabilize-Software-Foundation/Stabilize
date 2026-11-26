@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from stabilize.models.stage.displaced_request import restore_displaced
 from stabilize.models.stage.engine_keys import SIGNAL_KEYS
 from stabilize.models.status import WorkflowStatus
 
@@ -41,6 +42,7 @@ def reset_keys_for(implementing_class: str, task_registry: TaskRegistry | None) 
 def reset_tasks(stage: StageExecution, task_registry: TaskRegistry | None = None) -> None:
     """Return every task of *stage* to NOT_STARTED in a new generation and clear what the old run left behind."""
     stage.scheduled_time = None
+    restore_displaced(stage.context)
     for key in TASK_RESET_KEYS:
         stage.context.pop(key, None)
     for task in stage.tasks:

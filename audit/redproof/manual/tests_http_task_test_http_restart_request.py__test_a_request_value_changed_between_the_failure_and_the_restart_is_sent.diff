@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_restart_request.py::test_a_request_value_changed_between_the_failure_and_the_restart_is_sent
+--- a/src/stabilize/models/stage/displaced_request.py
++++ b/src/stabilize/models/stage/displaced_request.py
+@@ -38,7 +38,7 @@
+     if not isinstance(record, dict):
+         return
+     for key, entry in record.items():
+-        if not isinstance(entry, dict) or key not in context or digest(context[key]) != entry.get("wrote"):
++        if not isinstance(entry, dict) or key not in context:
+             continue
+         if "was" in entry:
+             context[key] = entry["was"]

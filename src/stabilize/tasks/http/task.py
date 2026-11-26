@@ -257,6 +257,8 @@ class HTTPTask(Task):
         }
     """
 
+    request_context_keys: tuple[str, ...] = ("url", "headers", "body")
+
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute HTTP request."""
         context = stage.context

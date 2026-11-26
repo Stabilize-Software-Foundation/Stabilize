@@ -80,6 +80,18 @@ value that no longer matches its digest was written after planning. 0.35.0 dropp
 stage downstream of one that output the same key (#118), and 0.35.1 sends them again. The engine keys
 are the engine's own record. A task does not need to read or write them.
 
+When a request ends in a status the stage does not accept, the task fails the stage and writes the
+response into the stage's context, where ``status_code``, ``headers``, ``body`` and ``url`` can be read
+beside the ``response_*`` names. Three of those keys are the ones the request is built from. Up to
+0.35.1 a stage that was then restarted with ``Orchestrator.restart``, or re-entered by a jump, sent the
+failed response's headers and body as its next request, to the last URL of any redirect (#119). From
+0.35.2 the engine records what the response replaced under the engine key ``_displaced_request`` and
+puts ``url``, ``headers`` and ``body`` back when the stage is reset. A key whose value was changed
+after the failure is left as it is. An operator can correct a body in the stored stage and restart
+the stage with the corrected body. A task class names its own request keys in
+``request_context_keys``. The default is empty, and a task with no request keys keeps whatever its
+failed result left in the context.
+
 Names that are also stage types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
