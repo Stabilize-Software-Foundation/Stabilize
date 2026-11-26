@@ -1,12 +1,12 @@
 test-id: tests/test_ack_in_transaction.py::test_the_queue_row_is_gone_when_the_handler_returns[sqlite]
 --- a/src/stabilize/persistence/sqlite/transaction.py
 +++ b/src/stabilize/persistence/sqlite/transaction.py
-@@ -365,7 +365,7 @@
-             ).fetchone()
-             refuse_foreign_row("processed_messages", message_id, held[0] if held else None, self._tenant)
+@@ -367,7 +367,7 @@
              raise DuplicateDeliveryError(message_id)
--        fence = delivery_fence(message_id, self._queue_table)
-+        fence = None
+         fence = None
+         if getattr(type(self._queue), "counts_deliveries", False) is True:
+-            fence = delivery_fence(message_id, self._queue_table)
++            fence = None
          if fence is not None:
              gone = self._conn.execute(
                  f"DELETE FROM {self._queue_table} "

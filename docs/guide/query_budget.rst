@@ -2,19 +2,34 @@ Database round trips per stage
 ==============================
 
 Running one no-op stage on PostgreSQL, from ``store()`` through
-``process_all()``, issues **87** SQL statements. Each additional stage adds
-**67**. ``tests/test_query_budget.py`` fails if either number rises, and
+``process_all()``, issues **73** SQL statements. Each additional stage adds
+**57**. ``tests/test_query_budget.py`` fails if either number rises, and
 ``audit/evaluations/measure_queries_per_stage.py`` prints the per-statement
-breakdown shown below.
+breakdown.
 
 A stage moves through seven queue messages: StartWorkflow, StartStage,
 StartTask, RunTask, CompleteTask, CompleteStage and CompleteWorkflow. Each
-message is polled, checked against ``processed_messages``, handled, marked
-processed and deleted, so about five statements per message are queue and
-deduplication bookkeeping before the handler does any work.
+message is polled and handled, and the handler's transaction marks it processed
+and deletes its queue row in one statement.
 
-One stage, by statement (0.31.0)
---------------------------------
+0.35.0 reduced the one-stage count from 87 to 73 and each additional stage from
+67 to 57:
+
+- A message delivered for the first time is no longer looked up in
+  ``processed_messages`` before it is handled. A row that was polled once cannot
+  have been marked, and the mark inside the handler's transaction still refuses a
+  duplicate. A redelivery is looked up as before.
+- The acknowledgement was a ``DELETE`` in a transaction of its own after the
+  handler returned. The transaction that marks the message now deletes the row,
+  checked against the attempt the message was delivered at.
+
+Both changes remove a transaction per message as well as a statement. A threaded
+processor (``start()``) also polls once per chain of messages, not once per
+message, which the synchronous count on this page does not show (see
+:doc:`processor`).
+
+One stage, by statement (0.31.0, before the two changes above)
+--------------------------------------------------------------
 
 .. code-block:: text
 

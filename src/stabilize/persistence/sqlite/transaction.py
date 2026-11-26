@@ -365,7 +365,9 @@ class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
             ).fetchone()
             refuse_foreign_row("processed_messages", message_id, held[0] if held else None, self._tenant)
             raise DuplicateDeliveryError(message_id)
-        fence = delivery_fence(message_id, self._queue_table)
+        fence = None
+        if getattr(type(self._queue), "counts_deliveries", False) is True:
+            fence = delivery_fence(message_id, self._queue_table)
         if fence is not None:
             gone = self._conn.execute(
                 f"DELETE FROM {self._queue_table} "

@@ -232,7 +232,9 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
             "execution_id": execution_id,
             "tenant": self._tenant,
         }
-        fence = delivery_fence(message_id, self._queue_table()) if self._queue is not None else None
+        fence = None
+        if getattr(type(self._queue), "counts_deliveries", False) is True:
+            fence = delivery_fence(message_id, self._queue_table())
         with self._conn.cursor() as cur:
             if fence is None:
                 cur.execute(_MARK_SQL, params)
