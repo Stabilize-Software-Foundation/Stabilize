@@ -136,6 +136,13 @@ Up to 0.35.1 a timeout while the body was read and a reply that was not HTTP lef
 exception, and ``continue_on_failure`` did not apply to them. A body shorter than its
 ``Content-Length`` was returned as a success (#126).
 
+A request can fail after the server has sent its status line. That happens when no more of the body
+arrives within ``timeout``, when the body ends before its ``Content-Length`` and when the body is
+longer than ``max_response_size``. With ``continue_on_failure`` the failed result's outputs then hold
+the status the server sent under ``status_code`` and ``response_status``, which can be 200. They hold
+``url`` and no ``body``. Without ``continue_on_failure`` the result has no outputs. Read the result's
+status or ``error_code`` before ``status_code``, because a 200 here is not a usable answer (#128).
+
 Kept connections
 ~~~~~~~~~~~~~~~~
 
