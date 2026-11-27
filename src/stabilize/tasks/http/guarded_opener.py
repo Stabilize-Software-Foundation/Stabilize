@@ -54,11 +54,10 @@ def _enforce(sock: socket.socket | None, host: str, is_blocked: Callable[[Any], 
         )
 
 
-def build_guarded_handlers(
+def guarded_connections(
     is_blocked: Callable[[Any], bool],
-    ssl_context: Any | None,
-) -> list[HTTPHandler | HTTPSHandler]:
-    """Handlers that refuse a connection whose peer address is blocked."""
+) -> tuple[type[http.client.HTTPConnection], type[http.client.HTTPSConnection]]:
+    """Connection classes that refuse a peer address that is blocked, checked when the socket connects."""
 
     class GuardedHTTPConnection(http.client.HTTPConnection):
         def connect(self) -> None:
@@ -78,14 +77,24 @@ def build_guarded_handlers(
                 self.close()
                 raise
 
+    return GuardedHTTPConnection, GuardedHTTPSConnection
+
+
+def build_guarded_handlers(
+    is_blocked: Callable[[Any], bool],
+    ssl_context: Any | None,
+) -> list[HTTPHandler | HTTPSHandler]:
+    """Handlers that refuse a connection whose peer address is blocked."""
+    http_connection, https_connection = guarded_connections(is_blocked)
+
     class GuardedHTTPHandler(HTTPHandler):
         def http_open(self, req: Any) -> Any:
-            return self.do_open(GuardedHTTPConnection, req)
+            return self.do_open(http_connection, req)
 
     class GuardedHTTPSHandler(HTTPSHandler):
         def https_open(self, req: Any) -> Any:
             if ssl_context is not None:
-                return self.do_open(GuardedHTTPSConnection, req, context=ssl_context)
-            return self.do_open(GuardedHTTPSConnection, req)
+                return self.do_open(https_connection, req, context=ssl_context)
+            return self.do_open(https_connection, req)
 
     return [GuardedHTTPHandler(), GuardedHTTPSHandler(context=ssl_context)]

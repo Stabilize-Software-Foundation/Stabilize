@@ -240,7 +240,14 @@ convention, not a semantic.
 
 A stage that runs again — a loop body, a jump target, a restarted stage —
 re-reads its ancestors rather than keeping the value it saw the first time.
-Keys the caller set directly on the stage still take precedence.
+A key the caller set directly on the stage takes precedence on the first plan.
+On a later plan an ancestor's output of the same key replaces it, which is how
+a loop variable declared with an initial value moves on. A key a jump sets in
+``jump_context`` is the stage's own for that plan. The built-in tasks read the
+request keys that their own outputs share (``url``, ``headers`` and ``body`` for
+``HTTPTask``, ``host`` and ``user`` for ``SSHTask``) from the value the stage
+declared, on every plan. Give a key of your own a name that no ancestor outputs
+if it must keep its declared value across a restart.
 
 .. code-block:: python
 

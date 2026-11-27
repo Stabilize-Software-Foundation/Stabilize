@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_forked_process_does_not_use_its_parents_kept_connections
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -55,7 +55,7 @@
+         self._pid = os.getpid()
+ 
+     def _own_process(self) -> None:
+-        if self._pid != os.getpid():
++        if False:
+             self._lock = threading.Lock()
+             self._idle = {}
+             self._pid = os.getpid()

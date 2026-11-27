@@ -68,9 +68,12 @@ filled with its ancestors' outputs before it runs (see :doc:`data_flow`), and up
 after another HTTP stage sent the upstream response's headers and body as its own request. From 0.35.0
 the task sends ``headers`` and ``body`` only when the stage declared them. A value that reached the
 context only from an upstream stage is left out of the request (#106). When a stage is planned again
-by a restart or a loop, the context takes the ancestor's output for a shared key, as the data-flow rule
-says. The planner keeps the stage's declared value under the engine key ``_declared_values``, and the
-request reads it from there.
+by a restart, a jump or a loop, the context takes the ancestor's output for a shared key, which is how
+a loop variable moves on (see :doc:`data_flow`). The planner keeps the stage's declared value under
+the engine key ``_declared_values``, and the request reads ``url``, ``headers`` and ``body`` from
+there. Up to 0.35.1 ``url`` was read from the context, and a restarted HTTP stage after another HTTP
+stage requested the upstream stage's URL (#122). ``SSHTask`` reads ``host`` and ``user`` the same way.
+A stage that declares no ``url`` still takes the one an ancestor outputs.
 
 A task may also set ``headers`` or ``body`` when it runs, in the stage's context or in a copy of the
 stage that it hands to ``HTTPTask.execute``. A subclass that adds an ``Authorization`` header this way
@@ -79,6 +82,88 @@ keeps the key out of the stored stage. Such a value is sent. The planner records
 value that no longer matches its digest was written after planning. 0.35.0 dropped these values in a
 stage downstream of one that output the same key (#118), and 0.35.1 sends them again. The engine keys
 are the engine's own record. A task does not need to read or write them.
+
+When a request ends in a status the stage does not accept, the task fails the stage and writes the
+response into the stage's context, where ``status_code``, ``headers``, ``body`` and ``url`` can be read
+beside the ``response_*`` names. Three of those keys are the ones the request is built from. Up to
+0.35.1 a stage that was then restarted with ``Orchestrator.restart``, or re-entered by a jump, sent the
+failed response's headers and body as its next request, to the last URL of any redirect (#119). From
+0.36.0 the engine records what the response replaced under the engine key ``_displaced_request`` and
+puts ``url``, ``headers`` and ``body`` back when the stage is reset. A key whose value was changed
+after the failure is left as it is. An operator can correct a body in the stored stage and restart
+the stage with the corrected body. A task class names its own request keys in
+``request_context_keys``. The default is empty, and a task with no request keys keeps whatever its
+failed result left in the context, except ``error``. A reset removes ``error`` for every task, and for
+``HTTPTask`` it also removes ``error_code`` and the response keys of the failed attempt (#124). A stage
+that succeeds after a restart then shows no failure in its context.
+
+Failed requests
+~~~~~~~~~~~~~~~
+
+A request that fails ends the task with a result. ``HTTPTask.execute`` does not raise for a refused
+address, a timeout, a connection error, a reply that is not HTTP or a body that ends early. With
+``continue_on_failure`` the result is FAILED_CONTINUE, and without it TERMINAL. The result's context
+holds the text under ``error`` and, from 0.36.0, one of these codes under ``error_code``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - ``error_code``
+     - When
+   * - ``invalid_request``
+     - No ``url``, an unsupported ``method``, an upload file that is missing, or a ``download_to`` path
+       that is refused.
+   * - ``blocked_address``
+     - The SSRF check refused the address, before the request or when the socket connected. The request
+       is not tried again, whatever ``retries`` says.
+   * - ``timeout``
+     - No reply, or no more of the body, within ``timeout`` seconds.
+   * - ``connection_failed``
+     - The connection could not be made or broke, the reply was not HTTP, or the body ended before its
+       ``Content-Length``.
+   * - ``response_too_large``
+     - The body is longer than ``max_response_size``.
+   * - ``http_status``
+     - The status is not 2xx, or not in ``expected_status``. The status is under ``status_code``.
+   * - ``no_response``
+     - The request ended with neither a response nor an error.
+
+The set is ``stabilize.tasks.http.failure.ERROR_CODES``. The texts under ``error`` are as they were in
+0.35.0 and are not a stable interface. Match on the code.
+
+Up to 0.35.1 a timeout while the body was read and a reply that was not HTTP left ``execute`` as an
+exception, and ``continue_on_failure`` did not apply to them. A body shorter than its
+``Content-Length`` was returned as a success (#126).
+
+Kept connections
+~~~~~~~~~~~~~~~~
+
+By default the task opens a connection for each request and closes it, which for HTTPS means a TLS
+handshake each time. From 0.36.0 a stage can set ``keep_alive`` to true. The request then goes out on
+an idle connection to the same scheme, host and port when the process holds one, and the connection
+stays open for the next request.
+
+.. code-block:: python
+
+    context = {"url": "https://mail.example/api/label", "method": "POST", "json": {...}, "keep_alive": True}
+
+The connections are shared by the stages and threads of one process. A connection is kept only when
+the response was read to its end and the server did not ask to close it. A response over
+``max_response_size``, a body that ends early, a timeout or any other error closes it. Before a kept
+connection is used again the task checks that the server has not closed it. If a GET, HEAD, PUT, DELETE
+or OPTIONS still fails on a kept connection before any response arrives, the task sends it once more
+on a new connection. It does not do that for a POST or a PATCH, because the server may have acted on
+the first one. The failure is reported, and ``retries`` applies as for any other.
+
+The SSRF check runs when each connection is made. A kept connection stays with the address that was
+checked. Requests with ``allow_private_urls`` and requests without it never share a connection, and
+neither do requests with different ``verify_ssl``, ``ca_cert``, ``client_cert`` or ``client_key``.
+
+The process holds at most 8 idle connections for a host and does not use one that has been idle for
+more than 30 s. A request that goes through a proxy is sent as it is without ``keep_alive``. Two
+requests that follow a redirect use two connections, since a redirect and its target are separate
+requests.
 
 Names that are also stage types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

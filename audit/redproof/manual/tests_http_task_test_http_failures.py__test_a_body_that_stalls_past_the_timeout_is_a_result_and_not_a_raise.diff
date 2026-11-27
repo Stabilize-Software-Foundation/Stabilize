@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_body_that_stalls_past_the_timeout_is_a_result_and_not_a_raise
+--- a/src/stabilize/tasks/http/response.py
++++ b/src/stabilize/tasks/http/response.py
+@@ -120,7 +120,7 @@
+                 with contextlib.suppress(json.JSONDecodeError):
+                     body_json = json.loads(body)
+ 
+-    except (ValueError, TimeoutError, ConnectionError, HTTPException) as e:
++    except (ValueError, ConnectionError, HTTPException) as e:
+         if isinstance(e, ValueError):
+             error, code = str(e), RESPONSE_TOO_LARGE if isinstance(e, ResponseTooLargeError) else INVALID_REQUEST
+         else:

@@ -1,0 +1,11 @@
+test-id: tests/test_deferred_choice_loser_outputs.py::test_a_finished_member_pruned_by_the_winner_passes_nothing_downstream
+--- a/src/stabilize/handlers/skip_stage.py
++++ b/src/stabilize/handlers/skip_stage.py
+@@ -104,7 +104,6 @@
+                 from stabilize.resilience.cancellation import cancel_task
+ 
+                 stage.context[PRUNED] = True
+-                stage.outputs = {}
+                 for task in stage.tasks:
+                     if task.status in _LIVE_TASK_STATUSES:
+                         if task.status != WorkflowStatus.NOT_STARTED:

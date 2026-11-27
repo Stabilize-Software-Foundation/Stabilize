@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_body_over_the_cap_is_response_too_large
+--- a/src/stabilize/tasks/http/response.py
++++ b/src/stabilize/tasks/http/response.py
+@@ -122,7 +122,7 @@
+ 
+     except (ValueError, TimeoutError, ConnectionError, HTTPException) as e:
+         if isinstance(e, ValueError):
+-            error, code = str(e), RESPONSE_TOO_LARGE if isinstance(e, ResponseTooLargeError) else INVALID_REQUEST
++            error, code = str(e), INVALID_REQUEST
+         else:
+             error, code = format_error(e), transport_code(e)
+         return failure(

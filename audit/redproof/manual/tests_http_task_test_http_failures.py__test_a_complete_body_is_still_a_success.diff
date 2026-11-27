@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_complete_body_is_still_a_success
+--- a/src/stabilize/tasks/http/failure.py
++++ b/src/stabilize/tasks/http/failure.py
+@@ -31,7 +31,7 @@
+ 
+ def require_complete(response: Any, received: int) -> None:
+     missing = getattr(response, "length", None)
+-    if isinstance(missing, int) and not isinstance(missing, bool) and missing > 0:
++    if isinstance(missing, int) and not isinstance(missing, bool) and missing >= 0:
+         raise TruncatedBodyError(f"response body ended after {received} of {received + missing} bytes")
+ 
+ 

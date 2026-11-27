@@ -21,6 +21,7 @@ import logging
 import socket
 import time
 from datetime import timedelta
+from http.client import HTTPException
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -29,13 +30,17 @@ from urllib.request import BaseHandler, HTTPRedirectHandler, HTTPSHandler, build
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
+from stabilize.models.stage.planned_digests import declared_or_current
 from stabilize.redaction import redact_userinfo
 from stabilize.tasks.http.constants import (
     DEFAULT_RETRY_ON_STATUS,
     DEFAULT_TIMEOUT,
+    RESPONSE_CONTEXT_KEYS,
     SUPPORTED_METHODS,
 )
-from stabilize.tasks.http.guarded_opener import BlockedPeerError, build_guarded_handlers
+from stabilize.tasks.http.failure import BLOCKED_ADDRESS, INVALID_REQUEST, failure, refused, transport_code
+from stabilize.tasks.http.guarded_opener import build_guarded_handlers
+from stabilize.tasks.http.kept import kept_session
 from stabilize.tasks.http.request import build_request
 from stabilize.tasks.http.response import process_response
 from stabilize.tasks.http.ssl_context import build_ssl_context
@@ -45,7 +50,6 @@ from stabilize.tasks.http.utils import (
     substitute_placeholders,
 )
 from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
 
 if TYPE_CHECKING:
     from http.client import HTTPMessage, HTTPResponse
@@ -53,6 +57,8 @@ if TYPE_CHECKING:
     from urllib.request import Request
 
     from stabilize.models.stage import StageExecution
+    from stabilize.tasks.http.kept import KeptSession
+    from stabilize.tasks.result import TaskResult
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +209,7 @@ class HTTPTask(Task):
         Error Handling:
             continue_on_failure (bool): Return failed_continue instead of terminal
             secrets (list[str]): Context keys to mask in logs
+            keep_alive (bool): Send on a kept connection to the host and keep it after (default: False)
 
     Outputs:
         response_status (int): HTTP response status
@@ -257,16 +264,27 @@ class HTTPTask(Task):
         }
     """
 
+    request_context_keys: tuple[str, ...] = ("url", "headers", "body")
+    reset_context_keys: tuple[str, ...] = RESPONSE_CONTEXT_KEYS
+
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute HTTP request."""
+        sessions: list[KeptSession] = []
+        try:
+            return self._execute(stage, sessions)
+        finally:
+            for session in sessions:
+                session.settle()
+
+    def _execute(self, stage: StageExecution, sessions: list[KeptSession]) -> TaskResult:
         context = stage.context
         continue_on_failure = context.get("continue_on_failure", False)
         secrets = context.get("secrets", [])
 
         # Extract and validate URL
-        url = context.get("url")
+        url = declared_or_current(context, "url")
         if not url:
-            return TaskResult.terminal(error="No 'url' specified in context")
+            return failure("No 'url' specified in context", INVALID_REQUEST)
 
         # Substitute placeholders in URL
         url = substitute_placeholders(url, context, secrets)
@@ -276,20 +294,20 @@ class HTTPTask(Task):
             try:
                 _validate_url_safety(url)
             except ValueError as e:
-                return TaskResult.terminal(error=str(e))
+                return failure(str(e), BLOCKED_ADDRESS)
 
         # Validate method
         method = context.get("method", "GET").upper()
         if method not in SUPPORTED_METHODS:
-            return TaskResult.terminal(error=f"Unsupported method '{method}'. Supported: {sorted(SUPPORTED_METHODS)}")
+            return failure(f"Unsupported method '{method}'. Supported: {sorted(SUPPORTED_METHODS)}", INVALID_REQUEST)
 
         # Build request
         try:
             request, body_bytes = build_request(method, url, context, secrets)
         except ValueError as e:
-            return TaskResult.terminal(error=str(e))
+            return failure(str(e), INVALID_REQUEST)
         except FileNotFoundError as e:
-            return TaskResult.terminal(error=f"File not found: {e}")
+            return failure(f"File not found: {e}", INVALID_REQUEST)
 
         # Build SSL context
         ssl_context = build_ssl_context(context)
@@ -301,7 +319,14 @@ class HTTPTask(Task):
         # address the socket actually reached.
         allow_private = context.get("allow_private_urls", False)
         opener_handlers: list[BaseHandler] = [_SafeRedirectHandler(allow_private=allow_private)]
-        if allow_private:
+        kept: KeptSession | None = None
+        if context.get("keep_alive"):
+            kept, kept_handlers = kept_session(
+                context, allow_private=allow_private, is_blocked=_is_blocked, ssl_context=ssl_context
+            )
+            sessions.append(kept)
+            opener_handlers.extend(kept_handlers)
+        elif allow_private:
             if ssl_context:
                 opener_handlers.append(HTTPSHandler(context=ssl_context))
         else:
@@ -348,7 +373,7 @@ class HTTPTask(Task):
 
         def should_retry(e: Exception) -> bool:
             """Check if error should trigger retry."""
-            if isinstance(e, ValueError | BlockedPeerError):
+            if refused(e):
                 # An SSRF refusal is deterministic; retrying re-resolves the
                 # name, which is the attacker's second chance.
                 return False
@@ -356,7 +381,7 @@ class HTTPTask(Task):
                 return True
             if isinstance(e, HTTPError) and e.code in retry_on_status:
                 return True
-            return bool(isinstance(e, (URLError, TimeoutError, OSError)))
+            return bool(isinstance(e, (URLError, TimeoutError, OSError, HTTPException)))
 
         http_retry_policy = RetryWithBackoffPolicy(
             max_retries=retries,
@@ -389,7 +414,7 @@ class HTTPTask(Task):
                 # Non-retryable HTTP error - return it for processing
                 return e
 
-            except (URLError, TimeoutError, OSError) as e:
+            except (URLError, TimeoutError, OSError, HTTPException) as e:
                 last_error = e
                 logger.debug("HTTPTask error: %s, will retry", e)
                 raise
@@ -413,9 +438,10 @@ class HTTPTask(Task):
             except RetryableStatusError as e:
                 # Shouldn't happen, but handle gracefully
                 last_response = e.response
-            except ValueError as e:
-                # An SSRF refusal from the pre-connect revalidation is not
-                # retryable and must not escape as an unhandled exception.
+            except (ValueError, OSError) as e:
+                # An SSRF refusal from the pre-connect revalidation or the
+                # connect-time peer guard is not retryable and must not escape
+                # as an unhandled exception.
                 last_error = e
         else:
             # No retries configured - single attempt
@@ -436,22 +462,20 @@ class HTTPTask(Task):
                 # execute() with an unhandled exception rather than returning a
                 # terminal TaskResult, turning a blocked request into a crash.
                 last_error = e
-            except (URLError, TimeoutError, OSError) as e:
+            except (URLError, TimeoutError, OSError, HTTPException) as e:
                 last_error = e
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 
         # Handle connection/timeout errors
         if last_response is None and last_error is not None:
-            error_msg = format_error(last_error)
-            if continue_on_failure:
-                return TaskResult.failed_continue(
-                    error=error_msg,
-                    outputs={"elapsed_ms": elapsed_ms, "url": redact_userinfo(url)},
-                )
-            return TaskResult.terminal(
-                error=error_msg,
-                context={"elapsed_ms": elapsed_ms, "url": redact_userinfo(url)},
+            attempt = {"elapsed_ms": elapsed_ms, "url": redact_userinfo(url)}
+            return failure(
+                format_error(last_error),
+                transport_code(last_error),
+                continue_on_failure=continue_on_failure,
+                outputs=attempt,
+                context=attempt,
             )
 
         # Process response
@@ -461,4 +485,5 @@ class HTTPTask(Task):
             url=url,
             elapsed_ms=elapsed_ms,
             continue_on_failure=continue_on_failure,
+            body_read=kept.body_read if kept is not None else None,
         )

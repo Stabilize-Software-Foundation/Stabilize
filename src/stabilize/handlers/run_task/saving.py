@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.errors.store_errors import is_store_unavailable
 from stabilize.handlers.run_task import held_results
 from stabilize.handlers.run_task.error import complete_with_error
+from stabilize.handlers.run_task.execution import resolve_task
 from stabilize.handlers.run_task.generation import same_generation
 from stabilize.handlers.run_task.result import get_backoff_period, process_result
+from stabilize.models.stage.displaced_request import DISPLACED_REQUEST, displaced_record
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
+from stabilize.tasks.registry import TaskNotFoundError
 
 if TYPE_CHECKING:
     from datetime import timedelta
@@ -73,6 +77,22 @@ class RunTaskSavingMixin:
 
     def _save_result(self, task_model: TaskExecution, result: TaskResult, message: RunTask) -> None:
         save_or_hold(self, task_model, result, message)
+
+    def _with_displaced_request(
+        self, stage: StageExecution, task_model: TaskExecution, result: TaskResult, message: RunTask
+    ) -> TaskResult:
+        """The result, carrying a record of the request keys its context replaces in the stage's context."""
+        if not isinstance(result.context, dict) or not result.context:
+            return result
+        try:
+            task = resolve_task(message.task_type, task_model, self.task_registry)
+        except TaskNotFoundError:
+            return result
+        keys = getattr(task, "request_context_keys", ())
+        record = displaced_record(stage.context, result.context, keys) if isinstance(keys, tuple) else None
+        if record is None:
+            return result
+        return replace(result, context={**result.context, DISPLACED_REQUEST: record})
 
     def _record_result_changes(self, stage: StageExecution, result: TaskResult, message: RunTask) -> None:
         """context.updated and outputs.updated for the keys a result changes, held for the result's transaction."""
@@ -141,11 +161,12 @@ class RunTaskSavingMixin:
                 self.txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
                 return
 
-            self._record_result_changes(stage, result, message)
+            saved = self._with_displaced_request(stage, task_model, result, message)
+            self._record_result_changes(stage, saved, message)
             process_result(
                 stage,
                 task_model,
-                result,
+                saved,
                 message,
                 self.txn_helper,
                 self._get_backoff_period,

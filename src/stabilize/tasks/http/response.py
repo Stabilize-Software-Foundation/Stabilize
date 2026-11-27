@@ -6,16 +6,28 @@ import contextlib
 import json
 import logging
 import os
+from http.client import HTTPException
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
 
 from stabilize.redaction import redact_userinfo
 from stabilize.tasks.http.constants import CHUNK_SIZE, DEFAULT_MAX_RESPONSE_SIZE
-from stabilize.tasks.http.utils import get_charset
+from stabilize.tasks.http.failure import (
+    HTTP_STATUS,
+    INVALID_REQUEST,
+    NO_RESPONSE,
+    RESPONSE_TOO_LARGE,
+    ResponseTooLargeError,
+    failure,
+    require_complete,
+    transport_code,
+)
+from stabilize.tasks.http.utils import format_error, get_charset
 from stabilize.tasks.result import TaskResult
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from http.client import HTTPResponse
 
 logger = logging.getLogger(__name__)
@@ -27,6 +39,7 @@ def process_response(
     url: str,
     elapsed_ms: int,
     continue_on_failure: bool,
+    body_read: Callable[[], None] | None = None,
 ) -> TaskResult:
     """Process HTTP response and build TaskResult.
 
@@ -36,12 +49,13 @@ def process_response(
         url: Original request URL
         elapsed_ms: Request duration in milliseconds
         continue_on_failure: Whether to return failed_continue on error
+        body_read: Called once the body has been read to its end
 
     Returns:
         TaskResult with response data or error
     """
     if response is None:
-        return TaskResult.terminal(error="No response received")
+        return failure("No response received", NO_RESPONSE)
 
     # Extract status and headers
     response_obj: HTTPResponse | HTTPError
@@ -83,14 +97,20 @@ def process_response(
                 while chunk := response_obj.read(CHUNK_SIZE):
                     bytes_written += len(chunk)
                     if bytes_written > max_size:
-                        raise ValueError(f"Response exceeds max size ({max_size} bytes)")
+                        raise ResponseTooLargeError(f"Response exceeds max size ({max_size} bytes)")
                     f.write(chunk)
+            require_complete(response_obj, bytes_written)
+            if body_read is not None:
+                body_read()
             body = download_to
             content_length = bytes_written
         else:
             body_bytes = response_obj.read(max_size + 1)
             if len(body_bytes) > max_size:
-                raise ValueError(f"Response exceeds max size ({max_size} bytes)")
+                raise ResponseTooLargeError(f"Response exceeds max size ({max_size} bytes)")
+            require_complete(response_obj, len(body_bytes))
+            if body_read is not None:
+                body_read()
 
             charset = get_charset(content_type)
             body = body_bytes.decode(charset, errors="replace")
@@ -100,13 +120,17 @@ def process_response(
                 with contextlib.suppress(json.JSONDecodeError):
                     body_json = json.loads(body)
 
-    except ValueError as e:
-        if continue_on_failure:
-            return TaskResult.failed_continue(
-                error=str(e),
-                outputs={"status_code": status_code, "response_status": status_code, "url": final_url},
-            )
-        return TaskResult.terminal(error=str(e))
+    except (ValueError, TimeoutError, ConnectionError, HTTPException) as e:
+        if isinstance(e, ValueError):
+            error, code = str(e), RESPONSE_TOO_LARGE if isinstance(e, ResponseTooLargeError) else INVALID_REQUEST
+        else:
+            error, code = format_error(e), transport_code(e)
+        return failure(
+            error,
+            code,
+            continue_on_failure=continue_on_failure,
+            outputs={"status_code": status_code, "response_status": status_code, "url": final_url},
+        )
 
     # Build outputs
     outputs: dict[str, Any] = {
@@ -134,9 +158,9 @@ def process_response(
 
         if status_code not in expected_status:
             error_msg = f"Unexpected status {status_code}, expected {expected_status}"
-            if continue_on_failure:
-                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-            return TaskResult.terminal(error=error_msg, context=outputs)
+            return failure(
+                error_msg, HTTP_STATUS, continue_on_failure=continue_on_failure, outputs=outputs, context=outputs
+            )
         # Status is in expected list - this is success
         logger.debug("HTTPTask success (expected status %s)", status_code)
         return TaskResult.success(outputs=outputs)
@@ -145,7 +169,6 @@ def process_response(
     if 200 <= status_code < 300:
         logger.debug("HTTPTask success: %s", status_code)
         return TaskResult.success(outputs=outputs)
-    error_msg = f"HTTP {status_code}"
-    if continue_on_failure:
-        return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-    return TaskResult.terminal(error=error_msg, context=outputs)
+    return failure(
+        f"HTTP {status_code}", HTTP_STATUS, continue_on_failure=continue_on_failure, outputs=outputs, context=outputs
+    )

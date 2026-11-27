@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_restart_request.py::test_the_record_of_a_failed_attempt_holds_only_the_request_keys_the_response_replaced
+--- a/src/stabilize/models/stage/displaced_request.py
++++ b/src/stabilize/models/stage/displaced_request.py
+@@ -26,8 +26,6 @@
+                 record[key] = {**entry, "wrote": wrote}
+                 changed = True
+             continue
+-        if key in context and digest(context[key]) == wrote:
+-            continue
+         record[key] = {"wrote": wrote, "was": context[key]} if key in context else {"wrote": wrote}
+         changed = True
+     return record if changed else None

@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_failed_status_whose_body_was_read_leaves_the_connection_kept
+--- a/src/stabilize/tasks/http/response.py
++++ b/src/stabilize/tasks/http/response.py
+@@ -109,8 +109,6 @@
+             if len(body_bytes) > max_size:
+                 raise ResponseTooLargeError(f"Response exceeds max size ({max_size} bytes)")
+             require_complete(response_obj, len(body_bytes))
+-            if body_read is not None:
+-                body_read()
+ 
+             charset = get_charset(content_type)
+             body = body_bytes.decode(charset, errors="replace")

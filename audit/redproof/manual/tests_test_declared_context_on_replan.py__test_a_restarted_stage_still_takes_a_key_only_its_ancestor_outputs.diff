@@ -1,0 +1,12 @@
+test-id: tests/test_declared_context_on_replan.py::test_a_restarted_stage_still_takes_a_key_only_its_ancestor_outputs
+--- a/src/stabilize/handlers/start_stage/planner.py
++++ b/src/stabilize/handlers/start_stage/planner.py
+@@ -50,7 +50,7 @@
+         previously_hydrated = set(stage.context.get(HYDRATED_KEYS) or ())
+         declared: dict[str, Any] = dict(stage.context.get(DECLARED_VALUES) or {})
+ 
+-        merged = ancestor_outputs
++        merged = {}
+         for key, value in stage.context.items():
+             if key in (HYDRATED_KEYS, DECLARED_VALUES, PLANNED_DIGESTS):
+                 continue

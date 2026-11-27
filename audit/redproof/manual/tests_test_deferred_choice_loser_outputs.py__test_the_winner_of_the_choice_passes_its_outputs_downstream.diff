@@ -1,0 +1,11 @@
+test-id: tests/test_deferred_choice_loser_outputs.py::test_the_winner_of_the_choice_passes_its_outputs_downstream
+--- a/src/stabilize/handlers/complete_stage/deferred.py
++++ b/src/stabilize/handlers/complete_stage/deferred.py
+@@ -40,6 +40,7 @@
+                 now = handler.current_time_millis()
+                 if decision.outcome == "winner":
+                     handler.set_stage_status(fresh, status)
++                    fresh.outputs = {}
+                     fresh.end_time = now
+                     for sibling in decision.live_siblings:
+                         txn.push_message(

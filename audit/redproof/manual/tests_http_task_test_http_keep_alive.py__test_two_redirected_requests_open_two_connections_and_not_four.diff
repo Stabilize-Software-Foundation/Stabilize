@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_two_redirected_requests_open_two_connections_and_not_four
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -156,7 +156,7 @@
+         opened, self._opened = self._opened, []
+         for index, (key, connection, response) in enumerate(opened):
+             final = index == len(opened) - 1
+-            if (self._body_read or not final) and spent(response, chunked_counts=final):
++            if self._body_read and final and spent(response, chunked_counts=final):
+                 POOL.give(key, connection)
+             else:
+                 connection.close()

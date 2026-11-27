@@ -22,6 +22,9 @@ The public API of stabilize, as of 0.34.0, is:
   properties ``wake_channel_proven``, ``idle_interval_ms`` and ``last_reclaim``,
   and the HTTPTask outputs ``response_status``, ``response_headers``,
   ``response_body`` and ``response_body_json``;
+* from 0.36.0, ``Task.request_context_keys``, the ``HTTPTask`` context key ``keep_alive``, the context
+  key ``error_code`` that ``HTTPTask`` writes on a failed request, and the codes in
+  ``stabilize.tasks.http.failure.ERROR_CODES``;
 * tenancy mode, the ``stabilize_tenant`` column, ``Workflow.tenant``,
   ``stabilize.current_tenant()`` and the ``tenant`` argument of every store,
   queue and event store;

@@ -16,7 +16,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 PLANNED_DIGESTS = "_planned_digests"
-DIGESTED_KEYS = frozenset({"headers", "body"})
+DECLARED_VALUES = "_declared_values"
+DIGESTED_KEYS = frozenset({"url", "headers", "body", "host", "user"})
 
 
 def _normalised(value: Any) -> Any:
@@ -52,3 +53,15 @@ def changed_since_planning(context: Mapping[str, Any], key: str) -> bool:
     if not isinstance(digests, dict) or key not in digests:
         return False
     return bool(digest(context.get(key)) != digests[key])
+
+
+def declared_or_current(context: Mapping[str, Any], key: str) -> Any:
+    digests = context.get(PLANNED_DIGESTS)
+    declared = context.get(DECLARED_VALUES)
+    if not isinstance(digests, dict) or key not in digests:
+        return context.get(key)
+    if not isinstance(declared, dict) or key not in declared:
+        return context.get(key)
+    if digest(context.get(key)) != digests[key]:
+        return context.get(key)
+    return declared[key]

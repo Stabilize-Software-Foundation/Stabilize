@@ -1,5 +1,104 @@
 # Changelog
 
+## [0.36.0] - 2026-11-27
+
+Six fixes from an audit of the HTTP task and the stage context after 0.35.0, an error code on a failed
+HTTP request and kept connections for `HTTPTask`. Each defect was reproduced on the published 0.35.0,
+and #119 and #122 are in 0.34.6 as well. No schema change is needed, and 0.34.6, 0.35.0 and 0.35.1 can
+be upgraded to 0.36.0 directly.
+
+### Fixed
+
+- **A restarted HTTP or SSH stage uses the url, host and user it declared (#122).** When a stage is
+  planned again after a restart, a jump or a loop, an ancestor's output replaces the stage's value for
+  a key of the same name. Every `HTTPTask` outputs `url`, and a restarted HTTP stage downstream of
+  another HTTP stage requested the upstream stage's URL. A restarted SSH stage downstream of another
+  SSH stage connected to the upstream stage's `host` as its `user`. Both tasks now read these keys
+  from the value the stage declared, as `headers` and `body` have been read since 0.35.0. The planner
+  is unchanged, because loops rely on the ancestor's output for their variables.
+  `docs/guide/data_flow.rst` said a key set on the stage always takes precedence, and now states the
+  rule as it is. `tests/test_declared_context_on_replan.py`.
+
+- **A deferred-choice member that finishes and then loses passes nothing downstream (#123).** With
+  `deferredChoiceClaim: on_complete`, a member's outputs are stored when its task ends and the choice
+  is settled two messages later. A member that finished and then lost was stored SKIPPED with its
+  outputs, and the stage after the choice merged them with the winner's. Where both set a key, the
+  member with the later `ref_id` won. A loser is now stored with empty outputs, at its own completion
+  and when the winner prunes it. `tests/test_deferred_choice_loser_outputs.py`.
+
+- **A restarted HTTP stage sends the request it declared (#119).** When a request ends in a status
+  the stage does not accept, `HTTPTask` writes the response into the stage's context under `url`,
+  `headers` and `body`, the keys the request is built from. A stage that was then restarted with
+  `Orchestrator.restart`, or re-entered by a jump, sent the failed response's headers and body as its
+  next request and lost the ones it declared. After a redirect it went to the redirect target. The
+  engine now records what the response replaced under the engine key `_displaced_request` and puts
+  the three keys back when the stage is reset. A key whose value was changed after the failure is left
+  alone. The context of a failed stage reads as before until the reset.
+  `tests/http_task/test_http_restart_request.py`.
+
+- **A failure while HTTPTask reads the response is a result (#126).** A timeout while the body was
+  read and a reply that was not HTTP left `HTTPTask.execute` as an exception. `continue_on_failure`
+  did not apply, and the task's own `retries` did not cover a reply that was not HTTP. Both now end
+  the task with a failed result. A body that ends before its `Content-Length` was returned as a
+  success with the bytes that arrived. It is now a failure whose text names both lengths.
+
+- **A connect-time SSRF refusal is not tried again (#125).** The peer check at connect time raises
+  inside urllib, which wraps it, and the retry rule did not recognise the wrapped refusal. With
+  `retries` set the task connected again for each retry. Each attempt was refused, and no request
+  reached a blocked address. The refusal now ends the request at once.
+
+- **A stage that succeeds after a restart shows no failure in its context (#124).** A reset cleared
+  `exception` and left the `error` text of a failed result, and for `HTTPTask` the failed response
+  under `status_code` and the `response_*` names. A reset now removes `error` for every task, and
+  `HTTPTask` lists its response keys in `reset_context_keys`. Reset keys are found for a task named by
+  its class path as well as by its registered name.
+
+### Added
+
+- **An error code beside HTTPTask's error text (#121).** A failed request writes `error_code` to the
+  result's context beside `error`: `invalid_request`, `blocked_address`, `timeout`,
+  `connection_failed`, `response_too_large`, `http_status` or `no_response`. The set is
+  `stabilize.tasks.http.failure.ERROR_CODES`, and `docs/guide/tasks.rst` says when each is used. The
+  error texts are unchanged. Webmail asked for it.
+
+- **`HTTPTask` keeps connections to a host between requests when asked (#127).** A stage that sets
+  `keep_alive` to true sends its request on an idle connection to the same host when there is one, and
+  leaves the connection open for the next. It is off by default. A connection is kept only when the
+  response was read to its end and its length is accounted for, and is checked for a close by the peer
+  before it is used again. A GET, HEAD, PUT, DELETE or OPTIONS that fails on a kept connection before
+  any response is sent once more on a new one, and a POST or PATCH is reported. The SSRF check runs
+  for every new connection, and a connection made with `allow_private_urls` never serves a request
+  without it. At most 8 idle connections are held for a host and one idle for more than 30 s is not
+  used. Webmail asked for it: against its mail server a request took 80 ms at the median through
+  `HTTPTask` and 3 ms on a kept connection. CI has no TLS server, and the gain there is unmeasured.
+  `tests/http_task/test_http_keep_alive.py`, `docs/guide/tasks.rst`.
+
+- **`Task.request_context_keys` (#119).** A task class lists the context keys it builds its request
+  from. `HTTPTask` lists `url`, `headers` and `body`. The default is empty, and the context a failed
+  result leaves behind is kept across a restart for such a task, as in 0.35.1.
+
+### Changed
+
+- **One more engine context key (#119).** `_displaced_request` is listed in
+  `stabilize.models.stage.engine_keys`. It appears in the context of a stage whose HTTP task failed
+  and is removed when the stage is reset.
+
+### Upgrade note
+
+A stage that failed under 0.35.1 or earlier carries no record. A restart of it under 0.36.0 behaves
+as it did before the upgrade. A stage planned by 0.35.1 or earlier carries no digest for `url`, `host`
+or `user`, and reads them from its context until it is planned again.
+
+An HTTP stage that declared a `url` and relied on an ancestor's `url` output replacing it from the
+second pass of a loop now keeps the declared one. Leave `url` out of the stage's context to take the
+ancestor's output on every plan. The same holds for `host` and `user` of an SSH stage.
+
+A task that read `error` from its stage's context to learn why its previous run failed no longer finds
+it after a restart or a jump. Keep such state under a key of your own.
+
+Code that called `HTTPTask.execute` and caught `TimeoutError` or `http.client.HTTPException` around
+it now receives a failed result for those cases.
+
 ## [0.35.1] - 2026-11-26
 
 One fix for a regression in 0.35.0. No schema change is needed, and 0.34.6 can be upgraded to 0.35.1

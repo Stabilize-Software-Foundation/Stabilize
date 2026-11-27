@@ -43,6 +43,7 @@ class Task(ABC):
     """
 
     reset_context_keys: tuple[str, ...] = ()
+    request_context_keys: tuple[str, ...] = ()
 
     @abstractmethod
     def execute(self, stage: StageExecution) -> TaskResult:

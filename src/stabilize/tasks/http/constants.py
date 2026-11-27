@@ -8,6 +8,19 @@ DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
 DEFAULT_RETRY_ON_STATUS = [502, 503, 504]
 CHUNK_SIZE = 8192
 
+RESPONSE_CONTEXT_KEYS = (
+    "status_code",
+    "body_json",
+    "elapsed_ms",
+    "content_type",
+    "content_length",
+    "response_status",
+    "response_headers",
+    "response_body",
+    "response_body_json",
+    "error_code",
+)
+
 # Supported HTTP methods
 SUPPORTED_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
 

@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_failures.py::test_a_port_with_no_listener_is_connection_failed
+--- a/src/stabilize/tasks/http/failure.py
++++ b/src/stabilize/tasks/http/failure.py
+@@ -47,7 +47,7 @@
+     reason = error.reason if isinstance(error, URLError) else error
+     if isinstance(reason, TimeoutError):
+         return TIMEOUT
+-    return CONNECTION_FAILED
++    return TIMEOUT
+ 
+ 
+ def failure(

@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_with_no_declared_headers_sends_none_of_the_failed_response
+--- a/src/stabilize/handlers/jump_to_stage/reset.py
++++ b/src/stabilize/handlers/jump_to_stage/reset.py
+@@ -42,7 +42,7 @@
+ def reset_tasks(stage: StageExecution, task_registry: TaskRegistry | None = None) -> None:
+     """Return every task of *stage* to NOT_STARTED in a new generation and clear what the old run left behind."""
+     stage.scheduled_time = None
+-    restore_displaced(stage.context)
++    pass
+     for key in TASK_RESET_KEYS:
+         stage.context.pop(key, None)
+     for task in stage.tasks:
