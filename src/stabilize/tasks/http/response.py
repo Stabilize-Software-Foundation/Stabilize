@@ -49,6 +49,7 @@ def process_response(
         url: Original request URL
         elapsed_ms: Request duration in milliseconds
         continue_on_failure: Whether to return failed_continue on error
+        body_read: Called once the body has been read to its end
 
     Returns:
         TaskResult with response data or error

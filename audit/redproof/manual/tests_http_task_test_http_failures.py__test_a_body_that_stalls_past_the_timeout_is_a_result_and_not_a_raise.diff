@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_failures.py::test_a_body_that_stalls_past_the_timeout_is_a_result_and_not_a_raise
 --- a/src/stabilize/tasks/http/response.py
 +++ b/src/stabilize/tasks/http/response.py
-@@ -119,7 +119,7 @@
+@@ -120,7 +120,7 @@
                  with contextlib.suppress(json.JSONDecodeError):
                      body_json = json.loads(body)
  

@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_failures.py::test_a_body_shorter_than_its_content_length_is_a_failure
 --- a/src/stabilize/tasks/http/response.py
 +++ b/src/stabilize/tasks/http/response.py
-@@ -107,7 +107,6 @@
+@@ -108,7 +108,6 @@
              body_bytes = response_obj.read(max_size + 1)
              if len(body_bytes) > max_size:
                  raise ResponseTooLargeError(f"Response exceeds max size ({max_size} bytes)")

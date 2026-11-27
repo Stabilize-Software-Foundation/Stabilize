@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_failures.py::test_a_status_the_stage_does_not_accept_is_http_status
 --- a/src/stabilize/tasks/http/response.py
 +++ b/src/stabilize/tasks/http/response.py
-@@ -169,5 +169,5 @@
+@@ -170,5 +170,5 @@
          logger.debug("HTTPTask success: %s", status_code)
          return TaskResult.success(outputs=outputs)
      return failure(
