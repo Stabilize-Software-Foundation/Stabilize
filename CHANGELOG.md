@@ -1,9 +1,11 @@
 # Changelog
 
-## [0.35.2] - 2026-11-26
+## [0.36.0] - 2026-11-27
 
-Fixes for defects that are older than 0.34.6, found by an audit of the HTTP task and the stage
-context after 0.35.0. No schema change is needed.
+Six fixes from an audit of the HTTP task and the stage context after 0.35.0, an error code on a failed
+HTTP request and kept connections for `HTTPTask`. Each defect was reproduced on the published 0.35.0,
+and #119 and #122 are in 0.34.6 as well. No schema change is needed, and 0.34.6, 0.35.0 and 0.35.1 can
+be upgraded to 0.36.0 directly.
 
 ### Fixed
 
@@ -59,6 +61,18 @@ context after 0.35.0. No schema change is needed.
   `stabilize.tasks.http.failure.ERROR_CODES`, and `docs/guide/tasks.rst` says when each is used. The
   error texts are unchanged. Webmail asked for it.
 
+- **`HTTPTask` keeps connections to a host between requests when asked (#127).** A stage that sets
+  `keep_alive` to true sends its request on an idle connection to the same host when there is one, and
+  leaves the connection open for the next. It is off by default. A connection is kept only when the
+  response was read to its end and its length is accounted for, and is checked for a close by the peer
+  before it is used again. A GET, HEAD, PUT, DELETE or OPTIONS that fails on a kept connection before
+  any response is sent once more on a new one, and a POST or PATCH is reported. The SSRF check runs
+  for every new connection, and a connection made with `allow_private_urls` never serves a request
+  without it. At most 8 idle connections are held for a host and one idle for more than 30 s is not
+  used. Webmail asked for it: against its mail server a request took 80 ms at the median through
+  `HTTPTask` and 3 ms on a kept connection. CI has no TLS server, and the gain there is unmeasured.
+  `tests/http_task/test_http_keep_alive.py`, `docs/guide/tasks.rst`.
+
 - **`Task.request_context_keys` (#119).** A task class lists the context keys it builds its request
   from. `HTTPTask` lists `url`, `headers` and `body`. The default is empty, and the context a failed
   result leaves behind is kept across a restart for such a task, as in 0.35.1.
@@ -71,7 +85,7 @@ context after 0.35.0. No schema change is needed.
 
 ### Upgrade note
 
-A stage that failed under 0.35.1 or earlier carries no record. A restart of it under 0.35.2 behaves
+A stage that failed under 0.35.1 or earlier carries no record. A restart of it under 0.36.0 behaves
 as it did before the upgrade. A stage planned by 0.35.1 or earlier carries no digest for `url`, `host`
 or `user`, and reads them from its context until it is planned again.
 

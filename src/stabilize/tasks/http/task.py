@@ -40,6 +40,7 @@ from stabilize.tasks.http.constants import (
 )
 from stabilize.tasks.http.failure import BLOCKED_ADDRESS, INVALID_REQUEST, failure, refused, transport_code
 from stabilize.tasks.http.guarded_opener import build_guarded_handlers
+from stabilize.tasks.http.kept import kept_session
 from stabilize.tasks.http.request import build_request
 from stabilize.tasks.http.response import process_response
 from stabilize.tasks.http.ssl_context import build_ssl_context
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from urllib.request import Request
 
     from stabilize.models.stage import StageExecution
+    from stabilize.tasks.http.kept import KeptSession
     from stabilize.tasks.result import TaskResult
 
 logger = logging.getLogger(__name__)
@@ -207,6 +209,7 @@ class HTTPTask(Task):
         Error Handling:
             continue_on_failure (bool): Return failed_continue instead of terminal
             secrets (list[str]): Context keys to mask in logs
+            keep_alive (bool): Send on a kept connection to the host and keep it after (default: False)
 
     Outputs:
         response_status (int): HTTP response status
@@ -266,6 +269,14 @@ class HTTPTask(Task):
 
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute HTTP request."""
+        sessions: list[KeptSession] = []
+        try:
+            return self._execute(stage, sessions)
+        finally:
+            for session in sessions:
+                session.settle()
+
+    def _execute(self, stage: StageExecution, sessions: list[KeptSession]) -> TaskResult:
         context = stage.context
         continue_on_failure = context.get("continue_on_failure", False)
         secrets = context.get("secrets", [])
@@ -308,7 +319,14 @@ class HTTPTask(Task):
         # address the socket actually reached.
         allow_private = context.get("allow_private_urls", False)
         opener_handlers: list[BaseHandler] = [_SafeRedirectHandler(allow_private=allow_private)]
-        if allow_private:
+        kept: KeptSession | None = None
+        if context.get("keep_alive"):
+            kept, kept_handlers = kept_session(
+                context, allow_private=allow_private, is_blocked=_is_blocked, ssl_context=ssl_context
+            )
+            sessions.append(kept)
+            opener_handlers.extend(kept_handlers)
+        elif allow_private:
             if ssl_context:
                 opener_handlers.append(HTTPSHandler(context=ssl_context))
         else:
@@ -467,4 +485,5 @@ class HTTPTask(Task):
             url=url,
             elapsed_ms=elapsed_ms,
             continue_on_failure=continue_on_failure,
+            body_read=kept.body_read if kept is not None else None,
         )

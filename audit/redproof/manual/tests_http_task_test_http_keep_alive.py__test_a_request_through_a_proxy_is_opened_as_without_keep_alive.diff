@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_request_through_a_proxy_is_opened_as_without_keep_alive
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -108,8 +108,6 @@
+         self._body_read = True
+ 
+     def open(self, handler: Any, connection_class: Any, request: Request, **connection_args: Any) -> Any:
+-        if request.has_proxy() or getattr(request, "_tunnel_host", None):
+-            return handler.do_open(connection_class, request, **connection_args)
+         host = request.host
+         if not host:
+             raise URLError("no host given")

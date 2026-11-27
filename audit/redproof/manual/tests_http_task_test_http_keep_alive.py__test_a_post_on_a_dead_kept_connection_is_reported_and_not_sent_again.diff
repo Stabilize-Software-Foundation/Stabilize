@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_post_on_a_dead_kept_connection_is_reported_and_not_sent_again
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -17,7 +17,7 @@
+ 
+ MAX_IDLE_PER_KEY = 8
+ MAX_IDLE_SECONDS = 30.0
+-REPLAYED_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
++REPLAYED_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS", "POST"})
+ 
+ Key = tuple[Any, ...]
+ 

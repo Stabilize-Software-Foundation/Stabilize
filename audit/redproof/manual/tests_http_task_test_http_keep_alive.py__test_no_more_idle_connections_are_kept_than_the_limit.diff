@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_no_more_idle_connections_are_kept_than_the_limit
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -76,7 +76,7 @@
+         self._own_process()
+         with self._lock:
+             idle = self._idle.setdefault(key, [])
+-            if len(idle) < MAX_IDLE_PER_KEY:
++            if True:
+                 idle.append((time.monotonic(), connection))
+                 return
+         connection.close()

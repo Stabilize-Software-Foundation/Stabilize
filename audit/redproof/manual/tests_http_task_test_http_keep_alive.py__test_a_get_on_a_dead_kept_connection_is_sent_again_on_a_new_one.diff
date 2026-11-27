@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_get_on_a_dead_kept_connection_is_sent_again_on_a_new_one
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -143,8 +143,6 @@
+                 response = connection.getresponse()
+             except BaseException as error:
+                 connection.close()
+-                if reused and may_replay and dropped(error):
+-                    continue
+                 raise
+             break
+         response.url = request.get_full_url()

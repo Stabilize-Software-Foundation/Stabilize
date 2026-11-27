@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_truncated_body_closes_its_connection
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -156,7 +156,7 @@
+         opened, self._opened = self._opened, []
+         for index, (key, connection, response) in enumerate(opened):
+             final = index == len(opened) - 1
+-            if (self._body_read or not final) and spent(response, chunked_counts=final):
++            if True:
+                 POOL.give(key, connection)
+             else:
+                 connection.close()

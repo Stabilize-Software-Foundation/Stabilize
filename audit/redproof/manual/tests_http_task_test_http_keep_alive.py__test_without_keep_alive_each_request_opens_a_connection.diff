@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_without_keep_alive_each_request_opens_a_connection
+--- a/src/stabilize/tasks/http/task.py
++++ b/src/stabilize/tasks/http/task.py
+@@ -319,7 +319,7 @@
+         allow_private = context.get("allow_private_urls", False)
+         opener_handlers: list[BaseHandler] = [_SafeRedirectHandler(allow_private=allow_private)]
+         kept: KeptSession | None = None
+-        if context.get("keep_alive"):
++        if True:
+             kept, kept_handlers = kept_session(
+                 context, allow_private=allow_private, is_blocked=_is_blocked, ssl_context=ssl_context
+             )

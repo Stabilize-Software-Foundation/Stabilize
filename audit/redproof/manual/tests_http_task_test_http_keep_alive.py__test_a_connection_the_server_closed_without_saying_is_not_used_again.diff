@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_connection_the_server_closed_without_saying_is_not_used_again
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -32,7 +32,7 @@
+             return False
+         with selectors.DefaultSelector() as selector:
+             selector.register(sock, selectors.EVENT_READ)
+-            return not selector.select(0)
++            return True
+     except (OSError, ValueError):
+         return False
+ 

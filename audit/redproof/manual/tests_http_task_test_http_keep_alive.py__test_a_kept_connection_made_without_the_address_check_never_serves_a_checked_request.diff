@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_kept_connection_made_without_the_address_check_never_serves_a_checked_request
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -117,7 +117,7 @@
+         headers.update({name: value for name, value in request.headers.items() if name not in headers})
+         headers = {name.title(): value for name, value in headers.items()}
+         headers.setdefault("Connection", "keep-alive")
+-        key: Key = (request.type, host, *self._scope)
++        key: Key = (request.type, host)
+         method = request.get_method()
+         may_replay = method in REPLAYED_METHODS and (request.data is None or isinstance(request.data, bytes))
+         while True:

@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_failures.py::test_a_timeout_is_still_tried_again
 --- a/src/stabilize/tasks/http/task.py
 +++ b/src/stabilize/tasks/http/task.py
-@@ -363,7 +363,7 @@
+@@ -380,7 +380,7 @@
                  return True
              if isinstance(e, HTTPError) and e.code in retry_on_status:
                  return True

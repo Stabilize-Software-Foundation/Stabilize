@@ -1,0 +1,12 @@
+test-id: tests/http_task/test_http_keep_alive.py::test_a_post_after_a_get_gets_its_own_answer_on_the_kept_connection
+--- a/src/stabilize/tasks/http/kept.py
++++ b/src/stabilize/tasks/http/kept.py
+@@ -45,7 +45,7 @@
+ def spent(response: http.client.HTTPResponse, *, chunked_counts: bool) -> bool:
+     if not response.isclosed() or response.will_close:
+         return False
+-    return response.length == 0 or (chunked_counts and bool(response.chunked))
++    return False
+ 
+ 
+ class KeptConnections:

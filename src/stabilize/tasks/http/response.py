@@ -27,6 +27,7 @@ from stabilize.tasks.http.utils import format_error, get_charset
 from stabilize.tasks.result import TaskResult
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from http.client import HTTPResponse
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ def process_response(
     url: str,
     elapsed_ms: int,
     continue_on_failure: bool,
+    body_read: Callable[[], None] | None = None,
 ) -> TaskResult:
     """Process HTTP response and build TaskResult.
 
@@ -97,6 +99,8 @@ def process_response(
                         raise ResponseTooLargeError(f"Response exceeds max size ({max_size} bytes)")
                     f.write(chunk)
             require_complete(response_obj, bytes_written)
+            if body_read is not None:
+                body_read()
             body = download_to
             content_length = bytes_written
         else:
@@ -104,6 +108,8 @@ def process_response(
             if len(body_bytes) > max_size:
                 raise ResponseTooLargeError(f"Response exceeds max size ({max_size} bytes)")
             require_complete(response_obj, len(body_bytes))
+            if body_read is not None:
+                body_read()
 
             charset = get_charset(content_type)
             body = body_bytes.decode(charset, errors="replace")
