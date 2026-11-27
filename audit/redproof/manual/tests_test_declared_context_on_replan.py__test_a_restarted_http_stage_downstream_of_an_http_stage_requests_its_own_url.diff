@@ -1,7 +1,7 @@
 test-id: tests/test_declared_context_on_replan.py::test_a_restarted_http_stage_downstream_of_an_http_stage_requests_its_own_url
 --- a/src/stabilize/tasks/http/task.py
 +++ b/src/stabilize/tasks/http/task.py
-@@ -281,7 +281,7 @@
+@@ -282,7 +282,7 @@
          secrets = context.get("secrets", [])
  
          # Extract and validate URL

@@ -1,7 +1,7 @@
 test-id: tests/http_task/test_http_restart_request.py::test_a_restarted_http_stage_requests_the_url_it_declared
 --- a/src/stabilize/tasks/http/task.py
 +++ b/src/stabilize/tasks/http/task.py
-@@ -263,7 +263,7 @@
+@@ -264,7 +264,7 @@
          }
      """
  

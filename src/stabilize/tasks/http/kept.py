@@ -148,7 +148,7 @@ class KeptSession:
                 raise
             break
         response.url = request.get_full_url()
-        response.msg = response.reason  # type: ignore[assignment]
+        response.msg = response.reason
         self._opened.append((key, connection, response))
         return response
 
